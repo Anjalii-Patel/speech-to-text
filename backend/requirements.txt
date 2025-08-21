@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+aiohttp
+numpy
+torchaudio
+python-multipart
+faster-whisper
