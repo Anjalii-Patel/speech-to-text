@@ -101,15 +101,13 @@ try:
 
     model = WhisperModel(
         "large-v2",
-        # download_root=MODEL_DIR,  
         local_files_only=True,
         device=device,
         compute_type=compute_type,
         **kwargs
     )
 
-    logger.info("Whisper model loaded successfully.")
-
+    logger.info(f"Whisper model loaded successfully on {device.upper()} with compute type {compute_type}.")
 except Exception as e:
     logger.error("Error loading model: %s", str(e))
 
