@@ -1,6 +1,7 @@
 .vscode/
 my-venv/
 electron/
+backend/recordings
 
 # ---- PYTHON ----
 
