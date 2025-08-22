@@ -48,6 +48,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   uploadedTranscription: string = '';
   liveAudioUrl: string = ''; // Added for audio URL
   showAskAIForm: boolean = false; // Control visibility of Ask AI form
+  selectedQuality: string = 'medium'; // default
 
   showBeamSizePanel = false;
   beamSize = 2; // default
@@ -955,7 +956,6 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
               try {
                 const jsonData = JSON.parse(data);
                 this.medicalHistory = jsonData;
-                console.log("jsondata", jsonData);
 
                 this.showToast(
                   'success',
@@ -965,7 +965,6 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
                 );
               } catch (e) {
                 // Not JSON, just use as text
-                console.log('Response is not JSON, using as plain text');
                 this.showToast(
                   'success',
                   'Summary Generated',
@@ -1119,15 +1118,6 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
           block: blockPosition, // Use provided block position ('start', 'center', 'end')
         });
 
-        // Optional: Add focus outline temporarily (if applicable)
-        // const focusableElement =
-        //   element.querySelector('input, textarea, button') || element;
-        // if (focusableElement instanceof HTMLElement) {
-        //   focusableElement.classList.add('highlight-scroll-target');
-        //   setTimeout(() => {
-        //     focusableElement.classList.remove('highlight-scroll-target');
-        //   }, 1500);
-        // }
       } else {
         console.warn(`Scroll target element not found: ${selector}`);
       }
@@ -1210,7 +1200,6 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     this.wsService
       .askAI(currentTranscription, this.query)
       .then((response: string) => {
-        console.log('Llama response received:', response);
         this.processingTranscription = false;
 
         // Handle different response formats
@@ -1302,7 +1291,8 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         if (!res.ok) throw new Error(`HTTP error ${res.status}`);
         const data = await res.json();
         console.log('Whisper model reloaded successfully:', data);
-
+        this.scrollToElement('.app-container', 'start');
+        await new Promise(resolve => setTimeout(resolve, 100));
         const confirmedBeamSize = data.beam_size;
         this.showToast(
           'success',
@@ -1541,6 +1531,236 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     // Show error message in transcription area
     if (transcriptionArea instanceof HTMLTextAreaElement) {
       transcriptionArea.value = this.uploadedTranscription;
+    }
+
+    this.retryCount = 0;
+  }
+
+  // Enhanced file upload with clear progress feedback and retry
+  generateSummaryAudio(): void {
+    if (!this.liveAudioUrl) {
+      this.showToast(
+        'error',
+        'Upload Error',
+        'No file found.',
+        3000
+      );
+      return;
+    }
+
+    // // Clear any previous transcription to avoid confusion
+    // this.uploadedTranscription = '';
+    // this.transcription = '';
+
+    // Show loading indicators
+    this.loadingService.show();
+    this.isUploading = true;
+    this.processingTranscription = true;
+    this.uploadProgress = 0;
+
+    this.showToast(
+      'info',
+      'Summary Generation Started',
+      'Generating summary for your audio...',
+      3000
+    );
+
+    // Make transcription area show processing state
+    const transcriptionArea2 = document.querySelector(
+      '.transcription-area-final textarea'
+    );
+    if (transcriptionArea2) {
+      transcriptionArea2.setAttribute(
+        'placeholder',
+        'Final Transcription will appear here...'
+      );
+    }
+
+    const upload = () => {
+      const formData = new FormData();
+      formData.append('file', this.selectedFile!);
+
+      const uploadUrl = `${this.wsService.getHttpBaseUrl()}/upload_and_summary/`;
+
+      console.log('Uploading file for summary:', this.selectedFile);
+      // Create upload observer with progress tracking
+      const xhr = new XMLHttpRequest();
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          this.zone.run(() => {
+            this.uploadProgress = Math.round(
+              (event.loaded / event.total) * 100
+            );
+
+            // Update status message based on progress
+            if (this.uploadProgress < 100) {
+              if (transcriptionArea2) {
+                transcriptionArea2.setAttribute(
+                  'placeholder',
+                  `Uploading: ${this.uploadProgress}% complete...`
+                );
+              }
+            } else {
+              if (transcriptionArea2) {
+                transcriptionArea2.setAttribute(
+                  'placeholder',
+                  'Generating summary... This may take a moment.'
+                );
+              }
+            }
+          });
+        }
+      };
+
+      xhr.onload = () => {
+        this.zone.run(() => {
+          if (xhr.status === 200) {
+            const response = JSON.parse(xhr.response);
+            this.handleUploadSuccess2(response);
+          } else {
+            this.handleUploadError2(xhr.statusText);
+          }
+        });
+      };
+
+      xhr.onerror = () => {
+        this.zone.run(() => {
+          this.handleUploadError2('Network error occurred');
+        });
+      };
+
+      xhr.open('POST', uploadUrl, true);
+      xhr.send(formData);
+    };
+
+    upload();
+  }
+  handleUploadSuccess2(response: any): void {
+    console.log('Upload and summary response:', response);
+
+    this.processingTranscription = false;
+    this.isUploading = false;
+    this.loadingService.hide();
+
+    try {
+      if (response.final_transcription) {
+          this.uploadedTranscription = response.final_transcription;
+      }
+      if (response.summary) {
+        // Store structured data
+        this.medicalHistory = response.summary;
+
+        // Show in summary area
+        this.summary = 'Summary generated successfully. See structured data below.';
+
+        // Scroll to the transcription area to make it visible
+        setTimeout(() => {
+          const transcriptionArea = document.querySelector(
+            '.transcription-area-final'
+          );
+          if (transcriptionArea) {
+            transcriptionArea.scrollIntoView({
+              behavior: 'smooth',
+              block: 'center',
+            });
+
+            // Add a highlight effect to draw attention to the result
+            const textarea = transcriptionArea.querySelector('textarea');
+            if (textarea) {
+              textarea.classList.add('highlight-new');
+              setTimeout(() => {
+                textarea.classList.remove('highlight-new');
+              }, 1500);
+            }
+          }
+        }, 100);
+
+        this.showToast(
+          'success',
+          'Summary Generated',
+          'Your medical report has been created successfully.',
+          5000
+        );
+      } else {
+        this.summary = 'Error: No summary found in response.';
+        this.showToast('error', 'Summary Error', 'Backend did not return summary.', 4000);
+      }
+
+      if (this.selectedFile && this.uploadedTranscription && this.uploadedTranscription.trim() !== '') {
+        const formData = new FormData();
+        formData.append('audio_file', this.selectedFile); // Must match UploadFile param name in backend
+        formData.append('transcription', this.uploadedTranscription);
+        formData.append('live_transcription', this.transcription);
+        formData.append('quality', this.selectedQuality);
+
+        const saveUrl = `${this.wsService.getHttpBaseUrl()}/save-audio/`;
+        fetch(saveUrl, {
+          method: 'POST',
+          body: formData
+        })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(await response.text());
+          return response.json();
+        })
+        .then((data) => {
+          this.showToast('success', 'Audio Saved', 'Audio and transcription saved successfully.', 3000);
+          console.log('Save-audio response:', data);
+        })
+        .catch((err) => {
+          this.showToast('error', 'Save Error', 'Failed to save audio and transcription.', 4000);
+          console.error('Save-audio error:', err);
+        });
+      }
+    } 
+    catch (err) {
+      console.error('Error parsing response:', err);
+      this.summary = 'Error processing summary response.';
+      this.showToast('error', 'Processing Error', 'Could not process summary.', 4000);
+    }
+  }
+  
+  private handleUploadError2(error: string): void {
+    // Reset placeholder in transcription area
+    const transcriptionArea2 = document.querySelector(
+      '.transcription-area-final textarea'
+    );
+    if (transcriptionArea2) {
+      transcriptionArea2.setAttribute(
+        'placeholder',
+        'Error processing file. Please try again.'
+      );
+      transcriptionArea2.classList.add('error');
+      setTimeout(() => {
+        transcriptionArea2.classList.remove('error');
+      }, 2000);
+    }
+
+    if (this.retryCount < this.RETRY_ATTEMPTS) {
+      this.retryCount++;
+      this.showToast(
+        'warning',
+        'Upload Failed',
+        `Retrying upload (${this.retryCount}/${this.RETRY_ATTEMPTS})...`,
+        3000
+      );
+      setTimeout(() => this.generateSummaryAudio(), 1000);
+      return;
+    }
+
+    this.loadingService.hide();
+    this.isUploading = false;
+    this.processingTranscription = false;
+    this.uploadedTranscription = `Error: Upload failed after ${this.RETRY_ATTEMPTS} attempts. Please try again or choose a different file.`;
+
+    this.showToast(
+      'error',
+      'Upload Failed',
+      'Could not upload the audio file after multiple attempts.',
+      5000
+    );
+    // Show error message in transcription area
+    if (transcriptionArea2 instanceof HTMLTextAreaElement) {
+      transcriptionArea2.value = this.uploadedTranscription;
     }
 
     this.retryCount = 0;
