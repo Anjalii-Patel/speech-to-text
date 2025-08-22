@@ -113,9 +113,14 @@
             {{ isRecording ? "Stop Recording" : "Start Recording" }}
           </button>
 
-          <button
+          <!-- <button
             class="action-button magic-button tooltip"
             (click)="generateSummaryWS()"
+            [disabled]="!transcription"
+          > -->
+          <button
+            class="action-button magic-button tooltip"
+            (click)="generateSummaryAudio()"
             [disabled]="!transcription"
           >
             <i class="material-icons">auto_awesome</i>
@@ -155,6 +160,32 @@
             [(ngModel)]="transcription"
             rows="6"
             placeholder="Your transcription will appear here..."
+          ></textarea>
+        </div>
+
+        <div class="quality-selector">
+          <h3>Select live transcription Quality</h3>
+          <label>
+            <input type="radio" name="quality" value="high" [(ngModel)]="selectedQuality">
+            <span>High</span>
+          </label>
+          <label>
+            <input type="radio" name="quality" value="medium" [(ngModel)]="selectedQuality">
+            <span>Medium</span>
+          </label>
+          <label>
+            <input type="radio" name="quality" value="low" [(ngModel)]="selectedQuality">
+            <span>Low</span>
+          </label>
+        </div>
+
+        <!-- Improved Transcription Area -->
+        <div class="transcription-area-final">
+          <label>Final Transcription</label>
+          <textarea
+            [(ngModel)]="uploadedTranscription"
+            rows="6"
+            placeholder="Final transcription will appear here..."
           ></textarea>
         </div>
 
