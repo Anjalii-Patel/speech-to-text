@@ -1,5 +1,7 @@
 # main1.py
-import torchaudio
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import numpy as np
 import asyncio
 import aiohttp
@@ -10,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 import time
 import torch
-import os
 import librosa
 import soundfile as sf
 import logging
@@ -50,11 +51,8 @@ log_config = {
 dictConfig(log_config)
 logger = logging.getLogger(__name__)
 
-
-
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
-# OLLAMA_API_URL = "http://192.168.3.41:11434/api/generate"
-# OLLAMA_API_URL = "http://ollama:11434/api/generate"
+OLLAMA_API_URL_2 = "http://localhost:11434/api/chat"
 
 # Detect device
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -62,39 +60,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # Set compute type
 compute_type = "float16" if device == "cuda" else "int8"
 
-# Optional: use more threads for CPU
 kwargs = {}
 if device == "cpu":
     kwargs["cpu_threads"] = os.cpu_count()
-
-# # Get EXE's directory
-# base_dir = os.path.dirname(os.path.abspath(__file__))
-
-# # Your local model folder
-# model_dir = os.path.join(base_dir, "Models")
-
-# # Load from that folder, using model name
-# model = WhisperModel(
-#     "large-v2",
-#     download_root=model_dir,
-#     local_files_only=True,
-#     device=device,
-#     compute_type=compute_type,
-#     **kwargs
-# )
-# import sys
-
-# if getattr(sys, 'frozen', False):
-#     BASE_DIR = sys._MEIPASS
-# else:
-#     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# MODEL_DIR = os.path.join(BASE_DIR, "Model")
-
-# # Set environment vars
-# os.environ["TRANSFORMERS_CACHE"] = MODEL_DIR
-# os.environ["HF_HOME"] = MODEL_DIR
-# os.environ["HUGGINGFACE_HUB_CACHE"] = MODEL_DIR
 
 try:
     logger.info("Whisper model attempt to load.")
@@ -111,16 +79,7 @@ try:
 except Exception as e:
     logger.error("Error loading model: %s", str(e))
 
-
-# # Load model with correct multi-threading args
-# model = WhisperModel("large-v2", 
-#                      device="cpu", 
-#                      compute_type="int8"
-#                     #  ,cpu_threads=8
-#                     )   # For multi-threading within CUDA core
-
 app = FastAPI()
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -132,11 +91,11 @@ app.add_middleware(
 
 def ASR(audio):
     """Transcribe the audio into text."""
-    segments, _ = model.transcribe(audio, beam_size=2,vad_filter=True,task="translate")# word_timestamps=False)
+    segments, _ = model.transcribe(audio, beam_size=5,vad_filter=True,task="translate")# word_timestamps=False)
     text = " ".join(segment.text.strip() for segment in segments)
     return text
 
-async def ask_llama(context=" ", query=" "):
+async def ask_llama(context=" "):
     PROMPT_REQUESTS = {
         "brief_medical_history": {
             "prompt": "Summarize the Brief Patient medical History from entire conversation in one sentence.",
@@ -145,7 +104,7 @@ async def ask_llama(context=" ", query=" "):
             }
         },
         "chief_complaints": {
-            "prompt": "List chief complaints with duration and description.",
+            "prompt": "List patient's chief complaints with duration and description.",
             "format": {
                 "type": "object",
                 "properties": {
@@ -157,13 +116,13 @@ async def ask_llama(context=" ", query=" "):
             }
         },
         "current_symptoms_and_medical_background": {
-            "prompt": "Explain ODP/HPI, current symptoms and medicine history.",
+            "prompt": "Explain ODP/HPI, current symptoms and medicine history of patient.",
             "format": {
                 "type": "string"
             }
         },
         "past_medical_history": {
-            "prompt": "List past medical history with diagnosis type.",
+            "prompt": "List patient's past medical history with diagnosis type.",
             "format": {
                 "type": "object",
                 "properties": {
@@ -177,7 +136,7 @@ async def ask_llama(context=" ", query=" "):
             }
         },
         "hospitalization_and_surgical_history": {
-            "prompt": "Mention past hospitalization or surgeries with diagnosis, treatment, and admission time.",
+            "prompt": "Mention patient's past hospitalization or surgeries with diagnosis, treatment, and admission time.",
             "format": {
                 "type": "object",
                 "properties": {
@@ -189,13 +148,13 @@ async def ask_llama(context=" ", query=" "):
             }
         },
         "gynecological_history": {
-            "prompt": "Provide gynecological history.",
+            "prompt": "Provide patient's gynecological history if available, if not then respond with None.",
             "format": {
                 "type": "string"
             }
         },
         "lifestyle_and_social_activity": {
-            "prompt": "Describe physical activity, time and status.",
+            "prompt": "Describe patient's physical activity, time and status.",
             "format": {
                 "type": "object",
                 "properties": {
@@ -207,7 +166,7 @@ async def ask_llama(context=" ", query=" "):
             }
         },
         "family_history": {
-            "prompt": "Provide relevant family medical history including relation, disease name and age.",
+            "prompt": "Provide patient's relevant family medical history including relation, disease name and age from the conversation if available.",
             "format": {
                 "type": "object",
                 "properties": {
@@ -219,7 +178,7 @@ async def ask_llama(context=" ", query=" "):
             }
         },
         "allergies_and_hypersensitivities": {
-            "prompt": "Mention allergies with allergen, reaction type, severity and status.",
+            "prompt": "Mention patient's allergies with allergen, reaction type, severity and status.",
             "format": {
                 "type": "object",
                 "properties": {
@@ -235,21 +194,11 @@ async def ask_llama(context=" ", query=" "):
     }
 
     async def query_ollama(session, field, details):
-        # print(details["format"])
         if not isinstance(details["format"], dict):
             return field, {"error": "Invalid schema format"}
 
         formatted_schema = details["format"]
 
-        # formatted_schema = {
-        #     "type": "object",
-        #     # "properties": {
-        #     #     key: {"type": value}
-        #     #     for key, value in details["format"].items()
-        #     # },
-        #     "properties":details["format"],
-        #     "required": list(details["format"].keys())
-        # }
         payload = {
             "model": "llama3.2",
             "prompt": f"While extracting information if you do not find the data answer strictly with None. Context: {context}\n\n{details['prompt']}",
@@ -257,7 +206,6 @@ async def ask_llama(context=" ", query=" "):
             "options": {"temperature": 0.0},
             "stream": False
         }
-        print("Payload to ollama:\n",payload)
         start_time = time.perf_counter()
         try:
             async with session.post(OLLAMA_API_URL, json=payload) as resp:
@@ -300,13 +248,12 @@ async def ask_llama1(context, query=" "):
         },
         "stream": False
     }
-
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(OLLAMA_API_URL, json=payload, headers=headers) as response:
+            async with session.post(OLLAMA_API_URL_2, json=payload, headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
-                    return data.get("response", {}).get("content", "No response from Ollama")
+                    return data.get("message", {}).get("content", "No response from Ollama")
                 else:
                     return f"Error: {response.status}"
     except Exception as e:
@@ -360,14 +307,11 @@ async def generate_summary_api(websocket: WebSocket):
     try:
         while True:
             transcription = await websocket.receive_text()
-            summary = await ask_llama(transcription, "")
+            summary = await ask_llama(transcription)
             if isinstance(summary, dict):
                 await websocket.send_text(json.dumps(summary))
             else:
                 await websocket.send_text(str(summary))
-            # print("Raw Response from ollama:\n",summary)
-            # json_data = json.loads(summary)
-            # --------await websocket.send_text(summary)
     
     except WebSocketDisconnect:
         print("Client disconnected")
@@ -424,6 +368,54 @@ async def upload_audio(file: UploadFile = File(...)):
         logger.error(f"Failed to load/process audio: {e}")
         return {"error": str(e)}
 
+@app.post("/upload_and_summary/")
+async def upload_and_summary(file: UploadFile = File(...)):
+    audio_bytes = await file.read()
+    logger.info(f"Received type: {type(audio_bytes)}, Length: {len(audio_bytes)}")
+    logger.info(f"File content type: {file.content_type}, filename: {file.filename}")
+
+    try:
+        audio_array, sample_rate = sf.read(BytesIO(audio_bytes))
+
+        if audio_array.ndim > 1:
+            audio_array = np.mean(audio_array, axis=1)
+
+        if sample_rate != 16000:
+            audio_array = librosa.resample(audio_array, orig_sr=sample_rate, target_sr=16000)
+            sample_rate = 16000
+
+        max_val = np.max(np.abs(audio_array))
+        if max_val > 0:
+            audio_array = audio_array / max_val
+        else:
+            logger.warning("Silent audio detected, skipping normalization.")
+
+        audio_array = audio_array.astype(np.float32)
+
+        text = ASR(audio_array)
+        summary = await ask_llama(text)
+        print("Summary generated successfully.")
+        return {
+            "filename": file.filename,
+            "final_transcription": text,
+            "summary": summary
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to load/process audio: {e}")
+        return {"error": str(e)}
+
+beamsize = 2
+
+@app.post("/update-beam-size/")
+async def update_beam_size(new_beam_size: int = Form(...)):
+    global beamsize
+    try:
+        beamsize = int(new_beam_size)
+        return JSONResponse({"status": "success", "beam_size": beamsize, "message": f"Beam size updated to {beamsize}."})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
 # Create safe save path that works in .py or bundled EXE
 base_dir = (
     os.path.dirname(sys.executable)
@@ -434,37 +426,41 @@ SAVE_DIR = os.path.join(base_dir, "recordings")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 @app.post("/save-audio/")
-async def save_audio(audio_file: UploadFile, transcription: str = Form(...)):
+async def save_audio(audio_file: UploadFile, transcription: str = Form(...),
+                     live_transcription: str = Form(...), quality: str = Form(...)):
     logger.info("save_audio function called...")
-    logger.info(f"Received audio file: {audio_file.filename}, size: {audio_file.size if hasattr(audio_file, 'size') else 'unknown'}")
-    logger.info(f"Received transcription length: {len(transcription)}")
-    
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         audio_filename = f"audio_{timestamp}.wav"
         text_filename = f"transcription_{timestamp}.txt"
+        live_transcription_filename = f"live_transcription_{timestamp}.txt"
+
+        save_dir = os.path.join(SAVE_DIR, quality)
+        os.makedirs(save_dir, exist_ok=True)
+        logger.info(f"Saving files under directory: {save_dir}")
         
-        audio_path = os.path.join(SAVE_DIR, audio_filename)
-        text_path = os.path.join(SAVE_DIR, text_filename)
-        
+        audio_path = os.path.join(save_dir, audio_filename)
+        text_path = os.path.join(save_dir, text_filename)
+        live_transcription_path = os.path.join(save_dir, live_transcription_filename)
+
         # Save audio file
         with open(audio_path, "wb") as buffer:
             shutil.copyfileobj(audio_file.file, buffer)
-        logger.info(f"Audio file saved to {audio_path}")
         
         # Save transcription text
         with open(text_path, "w", encoding="utf-8") as f:
             f.write(transcription)
-        logger.info(f"Transcription file saved to {text_path}")
-        
+
+        with open(live_transcription_path, "w", encoding="utf-8") as f:
+            f.write(live_transcription)
+
         return JSONResponse({
             "message": "Files saved successfully",
             "audio_path": audio_path,
             "text_path": text_path,
-            "audio_filename": audio_filename,
-            "text_filename": text_filename,
-            "transcription_length": len(transcription)
+            "live_transcription_path": live_transcription_path,
         })
         
     except Exception as e:
@@ -476,35 +472,6 @@ async def save_audio(audio_file: UploadFile, transcription: str = Form(...)):
                 "details": str(e)
             }
         )
-
-# @app.post("/upload/")
-# async def upload_audio(file: UploadFile = File(...)):
-#     """Upload an audio file and get the transcription."""
-#     audio_bytes = await file.read()
-
-#     print(f"Received type: {type(audio_bytes)}, Length: {len(audio_bytes)} bytes")
-#     print(f"File content type: {file.content_type}, filename: {file.filename}")
-
-#     audio_tensor, sample_rate = torchaudio.load(BytesIO(audio_bytes), normalize=True)
-    
-#     if audio_tensor.dim() > 1:
-#         audio_tensor = audio_tensor.mean(dim=0)
-    
-#     if sample_rate != 16000:
-#         resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-#         audio_tensor = resampler(audio_tensor)
-    
-#     waveform_np = audio_tensor.numpy()
-#     waveform_np = waveform_np / np.max(np.abs(waveform_np))
-    
-#     text = ASR(waveform_np)
-#     # print(text)
-#     return {"filename": file.filename, "transcription": text}
-
-
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(app, host="0.0.0.0", port=8001, forwarded_allow_ips='*',ssl_certfile="cert.pem",ssl_keyfile="key.pem")
 
 if __name__ == "__main__":
     import uvicorn
