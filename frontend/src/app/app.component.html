@@ -634,6 +634,9 @@
     <!-- Summary Display Section (conditionally visible) -->
     <div class="summary-section fade-in" *ngIf="summary">
       <div class="card">
+          <div style="background: #fffbe6; border: 1px solid #ffe58f; padding: 12px; margin-bottom: 12px; border-radius: 6px; color: #ad8b00; font-weight: 500;">
+            Tick the boxes where answers are right.
+          </div>
         <h2 class="section-title">Text Summary</h2>
         <div class="transcription-area">
           <textarea
@@ -656,6 +659,9 @@
           <h3 class="medical-card-title">
             <i class="material-icons">description</i> Brief Medical History
           </h3>
+          <label>
+            <input type="checkbox" [(ngModel)]="correctChecks.brief_medical_history" /> Correct
+          </label>
           <textarea
             class="form-input"
             [(ngModel)]="medicalHistory.brief_medical_history"
@@ -669,6 +675,9 @@
           <h3 class="medical-card-title">
             <i class="material-icons">coronavirus</i> Chief Complaints
           </h3>
+          <label>
+            <input type="checkbox" [(ngModel)]="correctChecks.chief_complaints" /> Correct
+          </label>
           <div class="medical-data-grid">
             <div class="medical-data-item">
               <div class="data-label">Complaint</div>
@@ -707,6 +716,9 @@
           <h3 class="medical-card-title">
             <i class="material-icons">sick</i> Current Symptoms
           </h3>
+          <label>
+            <input type="checkbox" [(ngModel)]="correctChecks.current_symptoms" /> Correct
+          </label>
           <div class="medical-data-item">
             <div
               class="data-value"
@@ -727,6 +739,9 @@
           <h3 class="medical-card-title">
             <i class="material-icons">history</i> Past Medical History
           </h3>
+          <label>
+            <input type="checkbox" [(ngModel)]="correctChecks.past_medical_history" /> Correct
+          </label>
           <div class="medical-data-grid">
             <div class="medical-data-item">
               <div class="data-label">Diagnosis Type</div>
@@ -767,6 +782,9 @@
             Hospitalization & Surgical History
           </div>
           <div class="collapsible-content">
+            <label>
+              <input type="checkbox" [(ngModel)]="correctChecks.hospitalization" /> Correct
+            </label>
             <div class="medical-data-grid">
               <div class="medical-data-item">
                 <div class="data-label">Diagnosis</div>
@@ -824,6 +842,9 @@
             Gynecological History
           </div>
           <div class="collapsible-content">
+            <label>
+              <input type="checkbox" [(ngModel)]="correctChecks.gynecological_history" /> Correct
+            </label>
             <div class="medical-data-item">
               <div
                 class="data-value"
@@ -843,6 +864,9 @@
             Lifestyle & Social Activity
           </div>
           <div class="collapsible-content">
+            <label>
+              <input type="checkbox" [(ngModel)]="correctChecks.lifestyle" /> Correct
+            </label>
             <div class="medical-data-grid">
               <div class="medical-data-item">
                 <div class="data-label">Time</div>
@@ -885,6 +909,9 @@
             Family History
           </div>
           <div class="collapsible-content">
+            <label>
+              <input type="checkbox" [(ngModel)]="correctChecks.family_history" /> Correct
+            </label>
             <div class="medical-data-grid">
               <div class="medical-data-item">
                 <div class="data-label">Relation</div>
@@ -932,6 +959,9 @@
             Allergies & Hypersensitivities
           </div>
           <div class="collapsible-content">
+            <label>
+              <input type="checkbox" [(ngModel)]="correctChecks.allergies" /> Correct
+            </label>
             <div class="medical-data-grid">
               <div class="medical-data-item">
                 <div class="data-label">Allergy</div>
@@ -995,6 +1025,12 @@
               </div>
             </div>
           </div>
+        </div>
+         <!-- Submit Button for Evaluation -->
+        <div style="text-align:center; margin: 32px 0;">
+          <button class="action-button magic-button" (click)="submitEvaluation()">
+            <i class="material-icons">check_circle</i> Generate PDF
+          </button>
         </div>
       </div>
     </div>

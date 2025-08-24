@@ -23,6 +23,298 @@ import { takeUntil } from 'rxjs/operators';
   styleUrls: ['./app.component.css'],
 })
 export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
+  // Checkbox states for each summary section
+  correctChecks: any = {
+    brief_medical_history: false,
+    chief_complaints: false,
+    current_symptoms: false,
+    past_medical_history: false,
+    hospitalization: false,
+    gynecological_history: false,
+    lifestyle: false,
+    family_history: false,
+    allergies: false
+  };
+  // Submit evaluation and send to backend
+  async submitEvaluation(): Promise<void> {
+    const timestamp = new Date().toISOString();
+    const evaluation = {
+      timestamp,
+      transcription: this.uploadedTranscription,
+      // Brief Medical History
+      brief_medical_history_text: this.medicalHistory?.brief_medical_history || '',
+      brief_medical_history_correct: this.correctChecks.brief_medical_history,
+      // Chief Complaints
+      chief_complaints_complaint: this.medicalHistory?.chief_complaints?.Complaint || '',
+      chief_complaints_duration: this.medicalHistory?.chief_complaints?.Duration || '',
+      chief_complaints_description: this.medicalHistory?.chief_complaints?.Description || '',
+      chief_complaints_correct: this.correctChecks.chief_complaints,
+      // Current Symptoms
+      current_symptoms_and_medical_background: this.medicalHistory?.current_symptoms_and_medical_background || '',
+      current_symptoms_correct: this.correctChecks.current_symptoms,
+      // Past Medical History
+      past_medical_history_diagnosis_type: this.medicalHistory?.past_medical_history?.Diagnosis_Type || '',
+      past_medical_history_disease: this.medicalHistory?.past_medical_history?.Disease || '',
+      past_medical_history_correct: this.correctChecks.past_medical_history,
+      // Hospitalization & Surgical History
+      hospitalization_diagnosis: this.medicalHistory?.hospitalization_and_surgical_history?.Diagnosis || '',
+      hospitalization_treatment: this.medicalHistory?.hospitalization_and_surgical_history?.Treatment || '',
+      hospitalization_admission_time: this.medicalHistory?.hospitalization_and_surgical_history?.Admission_Time || '',
+      hospitalization_correct: this.correctChecks.hospitalization,
+      // Gynecological History
+      gynecological_history: this.medicalHistory?.gynecological_history || '',
+      gynecological_history_correct: this.correctChecks.gynecological_history,
+      // Lifestyle & Social Activity
+      lifestyle_physical_activity: this.medicalHistory?.lifestyle_and_social_activity?.Physical_Activity || '',
+      lifestyle_time: this.medicalHistory?.lifestyle_and_social_activity?.Time || '',
+      lifestyle_status: this.medicalHistory?.lifestyle_and_social_activity?.Status || '',
+      lifestyle_correct: this.correctChecks.lifestyle,
+      // Family History
+      family_history_relation: this.medicalHistory?.family_history?.Relation || '',
+      family_history_disease_name: this.medicalHistory?.family_history?.Disease_Name || '',
+      family_history_age: this.medicalHistory?.family_history?.Age || '',
+      family_history_correct: this.correctChecks.family_history,
+      // Allergies & Hypersensitivities
+      allergies_allergy: this.medicalHistory?.allergies_and_hypersensitivities?.Allergy || '',
+      allergies_allergen: this.medicalHistory?.allergies_and_hypersensitivities?.Allergen || '',
+      allergies_reaction_type: this.medicalHistory?.allergies_and_hypersensitivities?.Type_of_Reaction || '',
+      allergies_status: this.medicalHistory?.allergies_and_hypersensitivities?.Status || '',
+      allergies_severity: this.medicalHistory?.allergies_and_hypersensitivities?.Severity || '',
+      allergies_correct: this.correctChecks.allergies
+    };
+
+    // Send to FastAPI backend
+    fetch(`${this.wsService.getHttpBaseUrl()}/evaluate-summary/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(evaluation)
+    })
+      .then(async (res) => {
+        const result = await res.json();
+        if (res.ok && result.status === 'success') {
+          // PDF generation after successful save
+          await this.generateAndDownloadPDF(evaluation);
+          this.scrollToElement('.app-container','start');
+          this.showToast('success', 'PDF Generated', 'PDF downloaded successfully.', 4000);
+        } else {
+          this.showToast('error', 'PDF Generation Error', 'Could not generate PDF.', 5000);
+        }
+      })
+      .catch((err) => {
+        this.showToast('error', 'Network Error', 'Could not connect to server.', 5000);
+      });
+  }
+
+  async generateAndDownloadPDF(evaluation: any) {
+    const jsPDF = (await import('jspdf')).default;
+    const pdf = new jsPDF({ format: 'a4', unit: 'mm', orientation: 'portrait' });
+
+    // Layout and style variables
+    const leftMargin = 20;
+    let y = 30;
+    const lineHeight = 7.5;
+    const sectionSpacing = 10; // Reduced spacing for more compact layout
+    const pageHeight = 297;
+    const maxWidth = 170;
+    const sectionBoxWidth = maxWidth;
+    const sectionBoxPadding = 6;
+    // Color variables as individual values
+    const accentColorR = 74, accentColorG = 111, accentColorB = 165;
+    const sectionBgColorR = 253, sectionBgColorG = 253, sectionBgColorB = 254;
+    const borderColorR = 74, borderColorG = 111, borderColorB = 165;
+    const headerFont = 'helvetica';
+    const normalFont = 'times';
+
+    // Header
+    pdf.setFillColor(255,255,255);
+    pdf.setDrawColor(accentColorR, accentColorG, accentColorB);
+    pdf.setLineWidth(2);
+    pdf.rect(leftMargin-5, y-20, sectionBoxWidth+10, 36, 'FD');
+    // Logo
+    const logoBase64 = await this.getImageBase64('assets/image.png');
+    if (logoBase64) {
+      pdf.addImage(logoBase64, 'PNG', leftMargin, y-18, 22, 22);
+    }
+    pdf.setFont(headerFont, 'bold');
+    pdf.setFontSize(22);
+    pdf.setTextColor(accentColorR, accentColorG, accentColorB);
+    pdf.text('Artem Health Tech Pvt. Ltd.', leftMargin+30, y-6);
+    pdf.setFont(headerFont, 'normal');
+    pdf.setFontSize(12);
+    pdf.setTextColor(80,80,80);
+    pdf.text('Ahmedabad', leftMargin+30, y+6);
+    y += 26;
+    pdf.setDrawColor(accentColorR, accentColorG, accentColorB);
+    pdf.setLineWidth(2);
+    pdf.line(leftMargin, y, leftMargin+sectionBoxWidth, y);
+    y += 10;
+
+    // Date
+    pdf.setFont(headerFont, 'normal');
+    pdf.setFontSize(12);
+    pdf.setTextColor(60,60,60);
+    pdf.text(`Date: ${new Date(evaluation.timestamp).toLocaleString()}`, leftMargin, y);
+    y += lineHeight;
+
+    // Section helper for styled boxes
+    const addSection = (title: string, details: any, isList: boolean = false) => {
+      if (y > pageHeight - 35) {
+        pdf.addPage();
+        y = 30;
+      }
+      pdf.setFillColor(sectionBgColorR, sectionBgColorG, sectionBgColorB);
+      pdf.setDrawColor(borderColorR, borderColorG, borderColorB);
+      let detailCount = 1;
+      let boxHeight;
+      let lines: string[] = [];
+      if (isList && typeof details === 'object' && details !== null) {
+        detailCount = Object.keys(details).length;
+        boxHeight = lineHeight + 2 + detailCount * lineHeight + sectionBoxPadding*2;
+      } else {
+        let value = details;
+        if (!value || value === '') value = 'None';
+        lines = pdf.splitTextToSize(value, sectionBoxWidth - 25);
+        boxHeight = lines.length * lineHeight + lineHeight + sectionBoxPadding*2;
+        // If box would overflow page, break and continue on next page
+        if (y + boxHeight > pageHeight - 15) {
+          pdf.addPage();
+          y = 30;
+        }
+      }
+      pdf.rect(leftMargin, y, sectionBoxWidth, boxHeight, 'FD');
+      // Accent bar
+      pdf.setFillColor(accentColorR, accentColorG, accentColorB);
+      pdf.rect(leftMargin, y, 5, boxHeight, 'F');
+      // Section title
+      pdf.setFont(headerFont, 'bold');
+      pdf.setFontSize(15);
+      pdf.setTextColor(accentColorR, accentColorG, accentColorB);
+      pdf.text(title, leftMargin+sectionBoxPadding+5, y+lineHeight);
+      y += lineHeight + sectionBoxPadding;
+      pdf.setFont(normalFont, 'normal');
+      pdf.setFontSize(11);
+      pdf.setTextColor(44,44,44);
+      if (isList && typeof details === 'object' && details !== null) {
+        for (const [k, v] of Object.entries(details)) {
+          let value = v;
+          if (!value || value === '') value = 'None';
+          pdf.setFont(normalFont, 'bold');
+          pdf.text(`${k}:`, leftMargin+sectionBoxPadding+10, y);
+          pdf.setFont(normalFont, 'normal');
+          pdf.text(`${value}`, leftMargin+sectionBoxPadding+50, y);
+          y += lineHeight;
+        }
+      } else {
+        for (const line of lines) {
+          if (y > pageHeight - 15) {
+            pdf.addPage();
+            y = 30;
+            pdf.rect(leftMargin, y, sectionBoxWidth, boxHeight, 'FD');
+            pdf.setFillColor(accentColorR, accentColorG, accentColorB);
+            pdf.rect(leftMargin, y, 5, boxHeight, 'F');
+            pdf.setFont(headerFont, 'bold');
+            pdf.setFontSize(15);
+            pdf.setTextColor(accentColorR, accentColorG, accentColorB);
+            pdf.text(title, leftMargin+sectionBoxPadding+5, y+lineHeight);
+            y += lineHeight + sectionBoxPadding;
+            pdf.setFont(normalFont, 'normal');
+            pdf.setFontSize(11);
+            pdf.setTextColor(44,44,44);
+          }
+          pdf.text(line, leftMargin+sectionBoxPadding+10, y);
+          y += lineHeight;
+        }
+      }
+      y += sectionSpacing;
+    };
+
+    // Sections
+    addSection('Brief History', evaluation.brief_medical_history, false);
+    addSection('Chief Complaints', {
+      Complaint: evaluation.chief_complaints_complaint,
+      Duration: evaluation.chief_complaints_duration,
+      Description: evaluation.chief_complaints_description
+    }, true);
+    addSection('Current Symptoms & Medical Background', evaluation.current_symptoms_and_medical_background, false);
+    addSection('Past Medical History', {
+      Diagnosis_Type: evaluation.past_medical_history_diagnosis_type,
+      Disease: evaluation.past_medical_history_disease
+    }, true);
+    addSection('Hospitalization & Surgical History', {
+      Diagnosis: evaluation.hospitalization_diagnosis,
+      Treatment: evaluation.hospitalization_treatment,
+      Admission_Time: evaluation.hospitalization_admission_time
+    }, true);
+    addSection('Gynecological History', evaluation.gynecological_history, false);
+    addSection('Lifestyle & Social Activity', {
+      Physical_Activity: evaluation.lifestyle_physical_activity,
+      Time: evaluation.lifestyle_time,
+      Status: evaluation.lifestyle_status
+    }, true);
+    addSection('Family History', {
+      Relation: evaluation.family_history_relation,
+      Disease_Name: evaluation.family_history_disease_name,
+      Age: evaluation.family_history_age
+    }, true);
+    addSection('Allergies & Hypersensitivities', {
+      Allergy: evaluation.allergies_allergy,
+      Allergen: evaluation.allergies_allergen,
+      Type_of_Reaction: evaluation.allergies_reaction_type,
+      Status: evaluation.allergies_status,
+      Severity: evaluation.allergies_severity
+    }, true);
+
+    // Footer (always fits at bottom of last page)
+    if (y > pageHeight - 15) {
+      pdf.addPage();
+      y = pageHeight - 15;
+    }
+    pdf.setFont(headerFont, 'normal');
+    pdf.setFontSize(10);
+    pdf.setTextColor(120,120,120);
+    pdf.text('This summary is auto-generated and evaluated for medical documentation purposes.', leftMargin, pageHeight - 10);
+
+    pdf.save(`HIScribe_Prescription_${new Date(evaluation.timestamp).toLocaleString()}.pdf`);
+  }
+
+  // Helper to load image and convert to base64
+  async getImageBase64(url: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = function () {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+        } else {
+          resolve(null);
+        }
+      };
+      img.onerror = function () {
+        resolve(null);
+      };
+      img.src = url;
+    });
+  }
+
+  // Helper for multiline text with word wrap and page break
+  addMultilineText(pdf: any, text: string, x: number, y: number, maxWidth: number, lineHeight: number): number {
+    if (!text) return y;
+    const lines = pdf.splitTextToSize(text, maxWidth);
+    for (const line of lines) {
+      if (y > 287) { // A4 bottom margin
+        pdf.addPage();
+        y = 25;
+      }
+      pdf.text(line, x, y);
+      y += lineHeight;
+    }
+    return y;
+  }
   // Cleanup subject for better subscription management
   private destroy$ = new Subject<void>();
 
