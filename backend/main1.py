@@ -6,7 +6,7 @@ import numpy as np
 import asyncio
 import aiohttp
 from io import BytesIO
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request
 from faster_whisper import WhisperModel
 from fastapi.middleware.cors import CORSMiddleware
 import json
@@ -20,6 +20,7 @@ import sys
 from fastapi.responses import JSONResponse
 import shutil
 from datetime import datetime
+import csv
 
 log_config = {
     "version": 1,
@@ -472,6 +473,69 @@ async def save_audio(audio_file: UploadFile, transcription: str = Form(...),
                 "details": str(e)
             }
         )
+    
+EVALUATION_CSV_PATH = os.path.join(base_dir, "evaluation_data.csv")
+
+@app.post("/evaluate-summary/")
+async def evaluate_summary(request: Request):
+    try:
+        data = await request.json()
+        # Define CSV headers
+        headers = [
+            "timestamp",
+            "transcription",
+            "brief_medical_history_text",
+            "brief_medical_history_correct",
+            "chief_complaints_text",
+            "chief_complaints_correct",
+            "current_symptoms_text",
+            "current_symptoms_correct",
+            "past_medical_history_text",
+            "past_medical_history_correct",
+            "hospitalization_text",
+            "hospitalization_correct",
+            "gynecological_history_text",
+            "gynecological_history_correct",
+            "lifestyle_text",
+            "lifestyle_correct",
+            "family_history_text",
+            "family_history_correct",
+            "allergies_text",
+            "allergies_correct"
+        ]
+        # Compose combined fields
+        combined_data = {
+            "timestamp": data.get("timestamp", ""),
+            "transcription": data.get("transcription", ""),
+            "brief_medical_history_text": data.get("brief_medical_history_text", ""),
+            "brief_medical_history_correct": data.get("brief_medical_history_correct", ""),
+            "chief_complaints_text": f"Complaint: {data.get('chief_complaints_complaint', '')}; Duration: {data.get('chief_complaints_duration', '')}; Description: {data.get('chief_complaints_description', '')}",
+            "chief_complaints_correct": data.get("chief_complaints_correct", ""),
+            "current_symptoms_text": data.get("current_symptoms_and_medical_background", ""),
+            "current_symptoms_correct": data.get("current_symptoms_correct", ""),
+            "past_medical_history_text": f"Diagnosis Type: {data.get('past_medical_history_diagnosis_type', '')}; Disease: {data.get('past_medical_history_disease', '')}",
+            "past_medical_history_correct": data.get("past_medical_history_correct", ""),
+            "hospitalization_text": f"Diagnosis: {data.get('hospitalization_diagnosis', '')}; Treatment: {data.get('hospitalization_treatment', '')}; Admission Time: {data.get('hospitalization_admission_time', '')}",
+            "hospitalization_correct": data.get("hospitalization_correct", ""),
+            "gynecological_history_text": data.get("gynecological_history", ""),
+            "gynecological_history_correct": data.get("gynecological_history_correct", ""),
+            "lifestyle_text": f"Physical Activity: {data.get('lifestyle_physical_activity', '')}; Time: {data.get('lifestyle_time', '')}; Status: {data.get('lifestyle_status', '')}",
+            "lifestyle_correct": data.get("lifestyle_correct", ""),
+            "family_history_text": f"Relation: {data.get('family_history_relation', '')}; Disease Name: {data.get('family_history_disease_name', '')}; Age: {data.get('family_history_age', '')}",
+            "family_history_correct": data.get("family_history_correct", ""),
+            "allergies_text": f"Allergy: {data.get('allergies_allergy', '')}; Allergen: {data.get('allergies_allergen', '')}; Reaction Type: {data.get('allergies_reaction_type', '')}; Status: {data.get('allergies_status', '')}; Severity: {data.get('allergies_severity', '')}",
+            "allergies_correct": data.get("allergies_correct", "")
+        }
+        file_exists = os.path.isfile(EVALUATION_CSV_PATH)
+        with open(EVALUATION_CSV_PATH, mode="a", newline='', encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=headers)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(combined_data)
+        return JSONResponse({"status": "success", "message": "Evaluation data saved."})
+    except Exception as e:
+        logger.error(f"Error saving evaluation data: {str(e)}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 if __name__ == "__main__":
     import uvicorn
