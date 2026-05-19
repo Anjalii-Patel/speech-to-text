@@ -1,4 +1,3 @@
-# main1.py
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -21,138 +20,148 @@ from fastapi.responses import JSONResponse
 import shutil
 from datetime import datetime
 import csv
+import noisereduce as nr
+from asyncio import Lock, Queue
 
+# Logging
 log_config = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {
-        "default": {
-            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        },
-    },
+    "formatters": {"default": {"format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"}},
     "handlers": {
-        "file": {
-            "class": "logging.FileHandler",
-            "filename": "server.log",
-            "formatter": "default",
-            "level": "INFO",
-        },
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "default",
-            "level": "INFO",
-        },
+        "file":    {"class": "logging.FileHandler",   "filename": "server.log", "formatter": "default", "level": "INFO"},
+        "console": {"class": "logging.StreamHandler", "formatter": "default",   "level": "INFO"},
     },
-    "root": {
-        "handlers": ["file", "console"],
-        "level": "INFO",
-    },
+    "root": {"handlers": ["file", "console"], "level": "INFO"},
 }
-
 dictConfig(log_config)
 logger = logging.getLogger(__name__)
 
+# Ollama endpoints
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 OLLAMA_API_URL_2 = "http://localhost:11434/api/chat"
+OLLAMA_TIMEOUT = aiohttp.ClientTimeout(total=60)
 
-# Detect device
+# Whisper model
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-# Set compute type
 compute_type = "float16" if device == "cuda" else "int8"
+kwargs = {"cpu_threads": os.cpu_count()} if device == "cpu" else {}
 
-kwargs = {}
-if device == "cpu":
-    kwargs["cpu_threads"] = os.cpu_count()
+whisper_lock = Lock()          # prevents concurrent Whisper calls on same model
 
 try:
-    logger.info("Whisper model attempt to load.")
-
+    logger.info("Loading Whisper model...")
     model = WhisperModel(
-        "large-v2",
+        "large-v3",            # v3 > v2 for Indic languages
         local_files_only=True,
         device=device,
         compute_type=compute_type,
-        **kwargs
+        **kwargs,
     )
-
-    logger.info(f"Whisper model loaded successfully on {device.upper()} with compute type {compute_type}.")
+    logger.info(f"Whisper loaded on {device.upper()} / {compute_type}")
 except Exception as e:
-    logger.error("Error loading model: %s", str(e))
+    logger.error("Whisper load failed: %s", e)
 
+# Shared aiohttp session (app-level singleton)
+http_session: aiohttp.ClientSession | None = None
+
+# FastAPI
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins = ["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
 )
 
-def ASR(audio):
-    """Transcribe the audio into text."""
-    segments, _ = model.transcribe(audio, beam_size=5,vad_filter=True,task="translate")# word_timestamps=False)
-    text = " ".join(segment.text.strip() for segment in segments)
-    return text
+@app.on_event("startup")
+async def startup():
+    global http_session
+    http_session = aiohttp.ClientSession(timeout=OLLAMA_TIMEOUT)
 
-async def ask_llama(context=" "):
+@app.on_event("shutdown")
+async def shutdown():
+    if http_session:
+        await http_session.close()
+
+# Audio pre-processing
+def preprocess_audio(audio: np.ndarray, sr: int = 16000) -> np.ndarray:
+    """Noise-reduce → normalize. Returns float32."""
+    # Spectral gating noise reduction
+    audio = nr.reduce_noise(y=audio, sr=sr, stationary=False, prop_decrease=0.85)
+    max_val = np.max(np.abs(audio))
+    if max_val > 0:
+        audio = audio / max_val
+    return audio.astype(np.float32)
+
+# ASR
+def ASR(audio: np.ndarray) -> str:
+    """Transcribe + translate to English. Called inside asyncio.to_thread."""
+    segments, _ = model.transcribe(
+        audio,
+        beam_size=3,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 700},
+        task="translate",          # direct-to-English translation
+        language=None,             # auto-detect Hindi/Marathi/Gujarati/English
+        condition_on_previous_text=False,  # critical: reduces hallucination on noise
+        word_timestamps=True,
+    )
+    return " ".join(seg.text.strip() for seg in segments)
+
+async def transcribe_async(audio: np.ndarray) -> str:
+    """Thread-safe Whisper call with model lock."""
+    async with whisper_lock:
+        return await asyncio.to_thread(ASR, audio)
+
+# LLM: structured summary
+async def ask_llama(context: str = " ") -> dict:
     PROMPT_REQUESTS = {
         "brief_medical_history": {
             "prompt": "Summarize the Brief Patient medical History from entire conversation in one sentence.",
-            "format": {
-                "type": "string"
-            }
+            "format": {"type": "string"}
         },
         "chief_complaints": {
             "prompt": "List patient's chief complaints with duration and description.",
             "format": {
                 "type": "object",
                 "properties": {
-                    "Complaint": {"type": "string"},
-                    "Duration": {"type": "string"},
-                    "Description": {"type": "string"}
+                    "Complaint":    {"type": "string"},
+                    "Duration":     {"type": "string"},
+                    "Description":  {"type": "string"},
                 },
-                "required": ["Complaint", "Duration", "Description"]
-            }
+                "required": ["Complaint", "Duration", "Description"],
+            },
         },
         "current_symptoms_and_medical_background": {
             "prompt": "Explain ODP/HPI, current symptoms and medicine history of patient.",
-            "format": {
-                "type": "string"
-            }
+            "format": {"type": "string"},
         },
         "past_medical_history": {
             "prompt": "List patient's past medical history with diagnosis type.",
             "format": {
                 "type": "object",
                 "properties": {
-                    "Diagnosis_Type": {
-                        "type": "string",
-                        "enum": ["Clinical", "Differential", "Final", "Provisional", "Suspected"]
-                    },
-                    "Disease": {"type": "string"}
+                    "Diagnosis_Type": {"type": "string", "enum": ["Clinical","Differential","Final","Provisional","Suspected"]},
+                    "Disease":        {"type": "string"},
                 },
-                "required": ["Diagnosis_Type", "Disease"]
-            }
+                "required": ["Diagnosis_Type", "Disease"],
+            },
         },
         "hospitalization_and_surgical_history": {
             "prompt": "Mention patient's past hospitalization or surgeries with diagnosis, treatment, and admission time.",
             "format": {
                 "type": "object",
                 "properties": {
-                    "Diagnosis": {"type": "string"},
-                    "Treatment": {"type": "string"},
-                    "Admission_Time": {"type": "string"}
+                    "Diagnosis":      {"type": "string"},
+                    "Treatment":      {"type": "string"},
+                    "Admission_Time": {"type": "string"},
                 },
-                "required": ["Diagnosis", "Treatment", "Admission_Time"]
-            }
+                "required": ["Diagnosis", "Treatment", "Admission_Time"],
+            },
         },
         "gynecological_history": {
             "prompt": "Provide patient's gynecological history if available, if not then respond with None.",
-            "format": {
-                "type": "string"
-            }
+            "format": {"type": "string"},
         },
         "lifestyle_and_social_activity": {
             "prompt": "Describe patient's physical activity, time and status.",
@@ -160,320 +169,259 @@ async def ask_llama(context=" "):
                 "type": "object",
                 "properties": {
                     "Physical_Activity": {"type": "string"},
-                    "Time": {"type": "string"},
-                    "Status": {"type": "string"}
+                    "Time":              {"type": "string"},
+                    "Status":            {"type": "string"},
                 },
-                "required": ["Physical_Activity", "Time", "Status"]
-            }
+                "required": ["Physical_Activity", "Time", "Status"],
+            },
         },
         "family_history": {
-            "prompt": "Provide patient's relevant family medical history including relation, disease name and age from the conversation if available.",
+            "prompt": "Provide patient's relevant family medical history including relation, disease name and age.",
             "format": {
                 "type": "object",
                 "properties": {
-                    "Relation": {"type": "string"},
+                    "Relation":     {"type": "string"},
                     "Disease_Name": {"type": "string"},
-                    "Age": {"type": "string"}
+                    "Age":          {"type": "string"},
                 },
-                "required": ["Relation", "Disease_Name", "Age"]
-            }
+                "required": ["Relation", "Disease_Name", "Age"],
+            },
         },
         "allergies_and_hypersensitivities": {
             "prompt": "Mention patient's allergies with allergen, reaction type, severity and status.",
             "format": {
                 "type": "object",
                 "properties": {
-                    "Allergy": {"type": "string"},
-                    "Allergen": {"type": "string"},
+                    "Allergy":          {"type": "string"},
+                    "Allergen":         {"type": "string"},
                     "Type_of_Reaction": {"type": "string"},
-                    "Status": {"type": "string", "enum": ["active", "passive"]},
-                    "Severity": {"type": "string"}
+                    "Status":           {"type": "string", "enum": ["active","passive"]},
+                    "Severity":         {"type": "string"},
                 },
-                "required": ["Allergy", "Allergen", "Type_of_Reaction", "Status", "Severity"]
-            }
-        }
+                "required": ["Allergy","Allergen","Type_of_Reaction","Status","Severity"],
+            },
+        },
     }
 
-    async def query_ollama(session, field, details):
-        if not isinstance(details["format"], dict):
-            return field, {"error": "Invalid schema format"}
-
-        formatted_schema = details["format"]
-
+    async def query_ollama(field: str, details: dict):
         payload = {
-            "model": "llama3.2",
-            "prompt": f"While extracting information if you do not find the data answer strictly with None. Context: {context}\n\n{details['prompt']}",
-            "format": formatted_schema,
+            "model":   "llama3.2",
+            "prompt":  f"While extracting information if you do not find the data answer strictly with None. Context: {context}\n\n{details['prompt']}",
+            "format":  details["format"],
             "options": {"temperature": 0.0},
-            "stream": False
+            "stream":  False,
         }
-        start_time = time.perf_counter()
-        try:
-            async with session.post(OLLAMA_API_URL, json=payload) as resp:
-                raw = await resp.text()
-                print(f"[{field}] Raw Response:\n{raw}")
-                elapsed = time.perf_counter() - start_time
-                print(f"[{field}] Time taken: {elapsed:.2f}s")
+        for attempt in range(3):                       # retry up to 3×
+            try:
+                async with http_session.post(OLLAMA_API_URL, json=payload) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return field, json.loads(data.get("response", "{}"))
+                    else:
+                        raw = await resp.text()
+                        return field, {"error": f"HTTP {resp.status}", "raw": raw}
+            except asyncio.TimeoutError:
+                if attempt == 2:
+                    return field, {"error": "timeout"}
+                await asyncio.sleep(1)
+            except Exception as e:
+                return field, {"error": str(e)}
 
-                if resp.status == 200:
-                    try:
-                        response = await resp.json()
-                        return field, json.loads(response.get("response", "{}"))
-                    except Exception:
-                        return field, {"error": "Invalid JSON", "raw": raw}
-                else:
-                    return field, {"error": f"HTTP {resp.status}", "raw": raw}
-        except Exception as e:
-            return field, {"error": str(e)}
+    start = time.perf_counter()
+    tasks = [query_ollama(f, d) for f, d in PROMPT_REQUESTS.items()]
+    results = await asyncio.gather(*tasks)
+    logger.info(f"ask_llama total: {time.perf_counter()-start:.2f}s")
+    return {f: r for f, r in results}
 
-    async with aiohttp.ClientSession() as session:
-        start = time.perf_counter()
-        tasks = [query_ollama(session, field, details) for field, details in PROMPT_REQUESTS.items()]
-        results = await asyncio.gather(*tasks)
-        print(f"Total time for all fields: {time.perf_counter() - start:.2f}s")
-
-    return {field: result for field, result in results}
-    
-async def ask_llama1(context, query=" "):
-    headers = {'Content-Type': 'application/json'}
+# LLM: chat
+async def ask_llama1(context: str, query: str = " ") -> str:
     payload = {
         "model": "llama3.2",
         "messages": [
-            {"role": "system", "content": "Assume you are an expert doctor Assitant with no name made by Artem Health. Just talk to the patient and keep it short and precise and you can answer anything."},
-            {"role": "user", "content": context},
-            {"role": "user", "content": query},
+            {"role": "system", "content": "You are an expert doctor assistant made by Artem Health. Keep answers short and precise."},
+            {"role": "user",   "content": f"Conversation context:\n{context}"},
+            {"role": "user",   "content": query},
         ],
-
-        "option": {
-            "temperature": 0.0
-        },
-        "stream": False
+        "options": {"temperature": 0.0},
+        "stream":  False,
     }
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(OLLAMA_API_URL_2, json=payload, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get("message", {}).get("content", "No response from Ollama")
-                else:
-                    return f"Error: {response.status}"
+        async with http_session.post(OLLAMA_API_URL_2, json=payload) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data.get("message", {}).get("content", "No response")
+            return f"Error: {resp.status}"
+    except asyncio.TimeoutError:
+        return "Error: Ollama timeout"
     except Exception as e:
-        return f"Exception: {str(e)}"
+        return f"Exception: {e}"
 
-import numpy as np
-
-async def transcribe_async(audio_array):
-    """Run Faster-Whisper in a background task"""
-    return await asyncio.to_thread(ASR, audio_array.astype(np.float32))  # Run ASR in a separate thread
-
+# WebSocket: live transcription
 @app.websocket("/transcribe/")
 async def transcribe_audio(websocket: WebSocket):
     await websocket.accept()
-    audio_queue = []
-    sample_rate = 16000
-    buffer_size = sample_rate * 4
+
+    SAMPLE_RATE = 16000
+    CHUNK_SECONDS = 6                              # increased from 4→6
+    OVERLAP_SEC = 1
+    CHUNK_SIZE = SAMPLE_RATE * CHUNK_SECONDS
+    OVERLAP_SIZE = SAMPLE_RATE * OVERLAP_SEC
+    MAX_QUEUE = SAMPLE_RATE * 30               # backpressure: ~30s max buffered
+
+    audio_queue: list[np.ndarray] = []
+    total_buffered = 0
+
+    async def send_result(task: asyncio.Task):
+        try:
+            text = await task
+            if text.strip():
+                await websocket.send_text(text)
+        except Exception as e:
+            logger.error(f"send_result error: {e}")
+
     try:
         while True:
-            audio_bytes = await websocket.receive_bytes()
+            # heartbeat / receive with timeout to detect dead connections
+            try:
+                audio_bytes = await asyncio.wait_for(websocket.receive_bytes(), timeout=30)
+            except asyncio.TimeoutError:
+                await websocket.send_text("")     # ping-keep-alive
+                continue
 
-            # Ensure correct PCM chunk size
             if len(audio_bytes) % 2 != 0:
                 audio_bytes += b'\x00'
 
-            # Convert PCM to float32
-            audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-            audio_queue.append(audio_array)
+            chunk = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            audio_queue.append(chunk)
+            total_buffered += len(chunk)
 
-            # Process when buffer is full
-            if sum(len(chunk) for chunk in audio_queue) >= buffer_size:
-                combined_audio = np.concatenate(audio_queue)
+            # backpressure: drop oldest if too far behind
+            while total_buffered > MAX_QUEUE and audio_queue:
+                dropped = audio_queue.pop(0)
+                total_buffered -= len(dropped)
+                logger.warning("Backpressure: dropped old audio chunk")
+
+            if total_buffered >= CHUNK_SIZE:
+                combined = np.concatenate(audio_queue)
+                # carry-forward overlap to avoid word cutoff
+                leftover = combined[-OVERLAP_SIZE:]
                 audio_queue.clear()
+                audio_queue.append(leftover)
+                total_buffered = len(leftover)
 
-                # Run transcription in background
-                transcription_task = asyncio.create_task(transcribe_async(combined_audio))
-                asyncio.create_task(send_transcription(websocket, transcription_task))
+                # noise-reduce before ASR
+                cleaned = preprocess_audio(combined)
+                task = asyncio.create_task(transcribe_async(cleaned))
+                asyncio.create_task(send_result(task))
 
     except WebSocketDisconnect:
-        print("Client disconnected")
+        logger.info("Transcribe client disconnected")
 
-async def send_transcription(websocket, transcription_task):
-    transcription = await transcription_task  # Wait for ASR to finish
-    await websocket.send_text(transcription)  # Send back to client
-    
+# WebSocket: summary
 @app.websocket("/generate_summary/")
 async def generate_summary_api(websocket: WebSocket):
-    """WebSocket for generating summary in real-time."""
     await websocket.accept()
-    
     try:
         while True:
             transcription = await websocket.receive_text()
             summary = await ask_llama(transcription)
-            if isinstance(summary, dict):
-                await websocket.send_text(json.dumps(summary))
-            else:
-                await websocket.send_text(str(summary))
-    
+            await websocket.send_text(json.dumps(summary))
     except WebSocketDisconnect:
-        print("Client disconnected")
-        await websocket.close()
+        logger.info("Summary client disconnected")
 
+# WebSocket: AI chat
 @app.websocket("/talk_with_ai/")
 async def talk_with_ai_api(websocket: WebSocket):
-    """WebSocket for interacting with AI based on transcription."""
     await websocket.accept()
-    
     try:
         while True:
             data = await websocket.receive_json()
-            transcription = data.get("transcription")
-            query = data.get("query")
+            transcription = data.get("transcription", "")
+            query = data.get("query", "")
             response = await ask_llama1(transcription, query)
-            print(response)
             await websocket.send_text(response)
-    
     except WebSocketDisconnect:
-        print("Client disconnected")
-        await websocket.close()
+        logger.info("AI chat client disconnected")
+
+# REST: upload & transcribe
+def load_audio_bytes(audio_bytes: bytes) -> np.ndarray:
+    audio_array, sample_rate = sf.read(BytesIO(audio_bytes))
+    if audio_array.ndim > 1:
+        audio_array = np.mean(audio_array, axis=1)
+    if sample_rate != 16000:
+        audio_array = librosa.resample(audio_array, orig_sr=sample_rate, target_sr=16000)
+    return preprocess_audio(audio_array)
 
 @app.post("/upload/")
 async def upload_audio(file: UploadFile = File(...)):
-
-    audio_bytes = await file.read()
-    logger.info(f"Received type: {type(audio_bytes)}, Length: {len(audio_bytes)}")
-    logger.info(f"File content type: {file.content_type}, filename: {file.filename}")
-
     try:
-        audio_array, sample_rate = sf.read(BytesIO(audio_bytes))
-
-        if audio_array.ndim > 1:
-            audio_array = np.mean(audio_array, axis=1)
-
-        if sample_rate != 16000:
-            audio_array = librosa.resample(audio_array, orig_sr=sample_rate, target_sr=16000)
-            sample_rate = 16000
-
-        max_val = np.max(np.abs(audio_array))
-        if max_val > 0:
-            audio_array = audio_array / max_val
-        else:
-            logger.warning("Silent audio detected, skipping normalization.")
-
-        audio_array = audio_array.astype(np.float32)
-
-        text = ASR(audio_array)
-
+        audio_array = load_audio_bytes(await file.read())
+        text = await transcribe_async(audio_array)
         return {"filename": file.filename, "transcription": text}
-
     except Exception as e:
-        logger.error(f"Failed to load/process audio: {e}")
+        logger.error(f"upload error: {e}")
         return {"error": str(e)}
 
 @app.post("/upload_and_summary/")
 async def upload_and_summary(file: UploadFile = File(...)):
-    audio_bytes = await file.read()
-    logger.info(f"Received type: {type(audio_bytes)}, Length: {len(audio_bytes)}")
-    logger.info(f"File content type: {file.content_type}, filename: {file.filename}")
-
     try:
-        audio_array, sample_rate = sf.read(BytesIO(audio_bytes))
-
-        if audio_array.ndim > 1:
-            audio_array = np.mean(audio_array, axis=1)
-
-        if sample_rate != 16000:
-            audio_array = librosa.resample(audio_array, orig_sr=sample_rate, target_sr=16000)
-            sample_rate = 16000
-
-        max_val = np.max(np.abs(audio_array))
-        if max_val > 0:
-            audio_array = audio_array / max_val
-        else:
-            logger.warning("Silent audio detected, skipping normalization.")
-
-        audio_array = audio_array.astype(np.float32)
-
-        text = ASR(audio_array)
+        audio_array = load_audio_bytes(await file.read())
+        text = await transcribe_async(audio_array)
         summary = await ask_llama(text)
-        print("Summary generated successfully.")
-        return {
-            "filename": file.filename,
-            "final_transcription": text,
-            "summary": summary
-        }
-
+        return {"filename": file.filename, "final_transcription": text, "summary": summary}
     except Exception as e:
-        logger.error(f"Failed to load/process audio: {e}")
+        logger.error(f"upload_and_summary error: {e}")
         return {"error": str(e)}
 
-beamsize = 2
+# REST: beam size
+beamsize = 3
 
 @app.post("/update-beam-size/")
 async def update_beam_size(new_beam_size: int = Form(...)):
     global beamsize
     try:
         beamsize = int(new_beam_size)
-        return JSONResponse({"status": "success", "beam_size": beamsize, "message": f"Beam size updated to {beamsize}."})
+        return JSONResponse({"status": "success", "beam_size": beamsize})
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-# Create safe save path that works in .py or bundled EXE
+# REST: save audio
 base_dir = (
-    os.path.dirname(sys.executable)
-    if getattr(sys, 'frozen', False)
+    os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
     else os.path.dirname(__file__)
 )
 SAVE_DIR = os.path.join(base_dir, "recordings")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 @app.post("/save-audio/")
-async def save_audio(audio_file: UploadFile, transcription: str = Form(...),
-                     live_transcription: str = Form(...), quality: str = Form(...)):
-    logger.info("save_audio function called...")
-
+async def save_audio(
+    audio_file: UploadFile,
+    transcription: str = Form(...),
+    live_transcription: str = Form(...),
+    quality: str = Form(...),
+):
     try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        audio_filename = f"audio_{timestamp}.wav"
-        text_filename = f"transcription_{timestamp}.txt"
-        live_transcription_filename = f"live_transcription_{timestamp}.txt"
-
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         save_dir = os.path.join(SAVE_DIR, quality)
         os.makedirs(save_dir, exist_ok=True)
-        logger.info(f"Saving files under directory: {save_dir}")
-        
-        audio_path = os.path.join(save_dir, audio_filename)
-        text_path = os.path.join(save_dir, text_filename)
-        live_transcription_path = os.path.join(save_dir, live_transcription_filename)
 
-        # Save audio file
-        with open(audio_path, "wb") as buffer:
-            shutil.copyfileobj(audio_file.file, buffer)
-        
-        # Save transcription text
-        with open(text_path, "w", encoding="utf-8") as f:
+        audio_path = os.path.join(save_dir, f"audio_{ts}.wav")
+        text_path = os.path.join(save_dir, f"transcription_{ts}.txt")
+        live_path = os.path.join(save_dir, f"live_transcription_{ts}.txt")
+
+        with open(audio_path, "wb") as f:
+            shutil.copyfileobj(audio_file.file, f)
+        with open(text_path,  "w", encoding="utf-8") as f:
             f.write(transcription)
-
-        with open(live_transcription_path, "w", encoding="utf-8") as f:
+        with open(live_path,  "w", encoding="utf-8") as f:
             f.write(live_transcription)
 
-        return JSONResponse({
-            "message": "Files saved successfully",
-            "audio_path": audio_path,
-            "text_path": text_path,
-            "live_transcription_path": live_transcription_path,
-        })
-        
+        return JSONResponse({"message": "Saved", "audio_path": audio_path, "text_path": text_path})
     except Exception as e:
-        logger.error(f"Error saving files: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Failed to save files",
-                "details": str(e)
-            }
-        )
-    
+        logger.error(f"save_audio error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+# REST: evaluate summary
 EVALUATION_CSV_PATH = os.path.join(base_dir, "evaluation_data.csv")
 
 @app.post("/evaluate-summary/")
@@ -482,101 +430,59 @@ async def evaluate_summary(request: Request):
         data = await request.json()
         # Define CSV headers
         headers = [
-            "timestamp",
-            "transcription",
-            "brief_medical_history_text",
-            "brief_medical_history_correct",
-            "chief_complaints_text",
-            "chief_complaints_correct",
-            "current_symptoms_text",
-            "current_symptoms_correct",
-            "past_medical_history_text",
-            "past_medical_history_correct",
-            "hospitalization_text",
-            "hospitalization_correct",
-            "gynecological_history_text",
-            "gynecological_history_correct",
-            "lifestyle_text",
-            "lifestyle_correct",
-            "family_history_text",
-            "family_history_correct",
-            "allergies_text",
-            "allergies_correct"
+            "timestamp","transcription",
+            "brief_medical_history_text","brief_medical_history_correct",
+            "chief_complaints_text","chief_complaints_correct",
+            "current_symptoms_text","current_symptoms_correct",
+            "past_medical_history_text","past_medical_history_correct",
+            "hospitalization_text","hospitalization_correct",
+            "gynecological_history_text","gynecological_history_correct",
+            "lifestyle_text","lifestyle_correct",
+            "family_history_text","family_history_correct",
+            "allergies_text","allergies_correct",
         ]
-        # Compose combined fields
-        combined_data = {
-            "timestamp": data.get("timestamp", ""),
+        row = {
+            "timestamp":   data.get("timestamp", ""),
             "transcription": data.get("transcription", ""),
-            "brief_medical_history_text": data.get("brief_medical_history_text", ""),
+            "brief_medical_history_text":    data.get("brief_medical_history_text", ""),
             "brief_medical_history_correct": data.get("brief_medical_history_correct", ""),
-            "chief_complaints_text": f"Complaint: {data.get('chief_complaints_complaint', '')}; Duration: {data.get('chief_complaints_duration', '')}; Description: {data.get('chief_complaints_description', '')}",
+            "chief_complaints_text":    f"Complaint: {data.get('chief_complaints_complaint','')}; Duration: {data.get('chief_complaints_duration','')}; Description: {data.get('chief_complaints_description','')}",
             "chief_complaints_correct": data.get("chief_complaints_correct", ""),
-            "current_symptoms_text": data.get("current_symptoms_and_medical_background", ""),
+            "current_symptoms_text":    data.get("current_symptoms_and_medical_background", ""),
             "current_symptoms_correct": data.get("current_symptoms_correct", ""),
-            "past_medical_history_text": f"Diagnosis Type: {data.get('past_medical_history_diagnosis_type', '')}; Disease: {data.get('past_medical_history_disease', '')}",
+            "past_medical_history_text":    f"Diagnosis Type: {data.get('past_medical_history_diagnosis_type','')}; Disease: {data.get('past_medical_history_disease','')}",
             "past_medical_history_correct": data.get("past_medical_history_correct", ""),
-            "hospitalization_text": f"Diagnosis: {data.get('hospitalization_diagnosis', '')}; Treatment: {data.get('hospitalization_treatment', '')}; Admission Time: {data.get('hospitalization_admission_time', '')}",
+            "hospitalization_text":    f"Diagnosis: {data.get('hospitalization_diagnosis','')}; Treatment: {data.get('hospitalization_treatment','')}; Admission Time: {data.get('hospitalization_admission_time','')}",
             "hospitalization_correct": data.get("hospitalization_correct", ""),
-            "gynecological_history_text": data.get("gynecological_history", ""),
+            "gynecological_history_text":    data.get("gynecological_history", ""),
             "gynecological_history_correct": data.get("gynecological_history_correct", ""),
-            "lifestyle_text": f"Physical Activity: {data.get('lifestyle_physical_activity', '')}; Time: {data.get('lifestyle_time', '')}; Status: {data.get('lifestyle_status', '')}",
+            "lifestyle_text":    f"Physical Activity: {data.get('lifestyle_physical_activity','')}; Time: {data.get('lifestyle_time','')}; Status: {data.get('lifestyle_status','')}",
             "lifestyle_correct": data.get("lifestyle_correct", ""),
-            "family_history_text": f"Relation: {data.get('family_history_relation', '')}; Disease Name: {data.get('family_history_disease_name', '')}; Age: {data.get('family_history_age', '')}",
+            "family_history_text":    f"Relation: {data.get('family_history_relation','')}; Disease Name: {data.get('family_history_disease_name','')}; Age: {data.get('family_history_age','')}",
             "family_history_correct": data.get("family_history_correct", ""),
-            "allergies_text": f"Allergy: {data.get('allergies_allergy', '')}; Allergen: {data.get('allergies_allergen', '')}; Reaction Type: {data.get('allergies_reaction_type', '')}; Status: {data.get('allergies_status', '')}; Severity: {data.get('allergies_severity', '')}",
-            "allergies_correct": data.get("allergies_correct", "")
+            "allergies_text":    f"Allergy: {data.get('allergies_allergy','')}; Allergen: {data.get('allergies_allergen','')}; Reaction: {data.get('allergies_reaction_type','')}; Status: {data.get('allergies_status','')}; Severity: {data.get('allergies_severity','')}",
+            "allergies_correct": data.get("allergies_correct", ""),
         }
         file_exists = os.path.isfile(EVALUATION_CSV_PATH)
-        with open(EVALUATION_CSV_PATH, mode="a", newline='', encoding="utf-8") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=headers)
+        with open(EVALUATION_CSV_PATH, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
             if not file_exists:
                 writer.writeheader()
-            writer.writerow(combined_data)
-        return JSONResponse({"status": "success", "message": "Evaluation data saved."})
+            writer.writerow(row)
+        return JSONResponse({"status": "success"})
     except Exception as e:
-        logger.error(f"Error saving evaluation data: {str(e)}")
+        logger.error(f"evaluate_summary error: {e}")
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
+# Entry point
 if __name__ == "__main__":
     import uvicorn
-    import logging
-    from logging.config import dictConfig
-
-    log_config = {
-        "version": 1,
-        "disable_existing_loggers": False,
-        "formatters": {
-            "default": {
-                "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            },
-        },
-        "handlers": {
-            "file": {
-                "class": "logging.FileHandler",
-                "filename": "server.log",
-                "formatter": "default",
-                "level": "INFO",
-            },
-            "console": {
-                "class": "logging.StreamHandler",
-                "formatter": "default",
-                "level": "INFO",
-            },
-        },
-        "root": {
-            "handlers": ["file", "console"],
-            "level": "INFO",
-        },
-    }
-
-    dictConfig(log_config)
-
     uvicorn.run(
-        app, 
+        app,
         host="0.0.0.0",
         port=8001,
         forwarded_allow_ips="*",
         ssl_certfile="cert.pem",
         ssl_keyfile="key.pem",
-        log_config=log_config
+        log_config=log_config,
     )
