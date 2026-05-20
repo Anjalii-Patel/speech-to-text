@@ -53,7 +53,7 @@ try:
     logger.info("Loading Whisper model...")
     model = WhisperModel(
         "large-v3",            # v3 > v2 for Indic languages
-        local_files_only=True,
+        local_files_only=False,
         device=device,
         compute_type=compute_type,
         **kwargs,
@@ -94,18 +94,26 @@ def preprocess_audio(audio: np.ndarray, sr: int = 16000) -> np.ndarray:
     return audio.astype(np.float32)
 
 # ASR
+RMS_THRESHOLD = 0.01
+LANG_PROB_THRESHOLD = 0.4
+
 def ASR(audio: np.ndarray) -> str:
-    """Transcribe + translate to English. Called inside asyncio.to_thread."""
-    segments, _ = model.transcribe(
+    if np.sqrt(np.mean(audio**2)) < RMS_THRESHOLD:
+        return ""
+
+    segments, info = model.transcribe(
         audio,
         beam_size=3,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 700},
-        task="translate",          # direct-to-English translation
-        language=None,             # auto-detect Hindi/Marathi/Gujarati/English
-        condition_on_previous_text=False,  # critical: reduces hallucination on noise
+        task="translate",
+        language=None,
+        condition_on_previous_text=False,
         word_timestamps=True,
     )
+
+    if info.language_probability < LANG_PROB_THRESHOLD:
+        return ""
     return " ".join(seg.text.strip() for seg in segments)
 
 async def transcribe_async(audio: np.ndarray) -> str:
