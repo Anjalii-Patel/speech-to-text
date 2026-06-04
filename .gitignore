@@ -1,170 +1,21 @@
-.vscode/
+# Environment virtualenvs
 my-venv/
+stt_venv/
+
+# IDE and editor
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Repository-specific
 electron/
 backend/recordings
 
-# ---- PYTHON ----
-
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[codz]
-*$py.class
-
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py.cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Translations
-*.mo
-*.pot
-
-# Django
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask
-instance/
-.webassets-cache
-
-# Scrapy
-.scrapy
-
-# Sphinx
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
-
-# Jupyter
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-# .python-version
-
-# pipenv
-#Pipfile.lock
-
-# UV
-#uv.lock
-
-# poetry
-#poetry.lock
-#poetry.toml
-
-# pdm
-.pdm-python
-.pdm-build/
-
-# pixi
-.pixi
-
-# PEP 582
-__pypackages__/
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath
-*.sage.py
-
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder
-.spyderproject
-.spyproject
-
-# Rope
-.ropeproject
-
-# mkdocs
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre
-.pyre/
-
-# pytype
-.pytype/
-
-# Cython
-cython_debug/
-
-# PyCharm
-#.idea/
-
-# Abstra
-.abstra/
-
-# Visual Studio Code
-# .vscode/
-
-# Ruff
-.ruff_cache/
-
-# PyPI config
-.pypirc
+# System files
+.DS_Store
+Thumbs.db
 
 # Cursor
 .cursorignore
@@ -175,59 +26,5 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-
-# ---- ANGULAR ----
-
-# compiled output
-/dist/
-/out-tsc/
-/build/
-
-# dependencies
-/node_modules/
-
-# Angular Build artifacts
-/tmp/
-/angular/cache/
-
-# IDEs and editors
-/.idea/
-/.vscode/
-/*.sublime-project
-/*.sublime-workspace
-
-# Environment files
-/src/environments/environment*.ts
-
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# System files
-.DS_Store
-Thumbs.db
-
-# npm package lock files (optional - include if your team prefers reproducible builds)
-/package-lock.json
-/yarn.lock
-/pnpm-lock.yaml
-
-# Angular SSR (if used)
-/.server/
-
-# Storybook (if used)
-/storybook-static/
-
-# Test coverage
-/coverage/
-
-# Compiled TypeScript
-*.js
-*.js.map
-
-# Optional: VS Code angular-specific
-.angular
-
+# Abstra
+.abstra/
