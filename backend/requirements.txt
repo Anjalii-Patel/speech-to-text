@@ -5,3 +5,7 @@ numpy
 torchaudio
 python-multipart
 faster-whisper
+torch
+soundfile
+librosa
+noisereduce
