@@ -246,7 +246,7 @@ async def ask_llama1(context: str, query: str = " ") -> str:
     payload = {
         "model": "llama3.2",
         "messages": [
-            {"role": "system", "content": "You are an expert doctor assistant made by Artem Health. Keep answers short and precise."},
+            {"role": "system", "content": "You are an expert doctor assistant. Keep answers short and precise."},
             {"role": "user",   "content": f"Conversation context:\n{context}"},
             {"role": "user",   "content": query},
         ],
