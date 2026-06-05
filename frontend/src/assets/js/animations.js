@@ -1,4 +1,4 @@
-// Professional Animation Effects for HIScribe Medical Transcription Application
+// Professional Animation Effects for VaakAI Medical Transcription Application
 // This script adds subtle, professional visual enhancements without disrupting functionality
 
 document.addEventListener('DOMContentLoaded', function() {

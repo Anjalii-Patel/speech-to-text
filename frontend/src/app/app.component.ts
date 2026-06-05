@@ -131,14 +131,14 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     pdf.setLineWidth(2);
     pdf.rect(leftMargin-5, y-20, sectionBoxWidth+10, 36, 'FD');
     // Logo
-    const logoBase64 = await this.getImageBase64('assets/image.png');
+    const logoBase64 = await this.getImageBase64('assets/vaakAI_logo.png');
     if (logoBase64) {
       pdf.addImage(logoBase64, 'PNG', leftMargin, y-18, 22, 22);
     }
     pdf.setFont(headerFont, 'bold');
     pdf.setFontSize(22);
     pdf.setTextColor(accentColorR, accentColorG, accentColorB);
-    pdf.text('Artem Health Tech Pvt. Ltd.', leftMargin+30, y-6);
+    pdf.text('Vaak AI', leftMargin+30, y-6);
     pdf.setFont(headerFont, 'normal');
     pdf.setFontSize(12);
     pdf.setTextColor(80,80,80);
@@ -274,7 +274,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     pdf.setTextColor(120,120,120);
     pdf.text('This summary is auto-generated and evaluated for medical documentation purposes.', leftMargin, pageHeight - 10);
 
-    pdf.save(`HIScribe_Prescription_${new Date(evaluation.timestamp).toLocaleString()}.pdf`);
+    pdf.save(`VaakAI_Prescription_${new Date(evaluation.timestamp).toLocaleString()}.pdf`);
   }
 
   // Helper to load image and convert to base64
