@@ -1,152 +1,178 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <title>VaakAI</title>
     <base href="/" />
 
-    <!-- Enhanced meta tags for better SEO and mobile experience -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="Medical transcription application with AI assistance and real-time speech-to-text capabilities"
-    />
+    <meta name="description" content="VaakAI — Real-time multilingual clinical speech recognition and AI-powered medical summarization" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta
-      name="apple-mobile-web-app-status-bar-style"
-      content="black-translucent"
-    />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#0d0d0d" />
 
-    <!-- PWA icons and manifest -->
-    <link rel="icon" type="image/png" href="assets/vaakAI_logo.png" />
-    <link rel="apple-touch-icon" href="assets/vaakAI_logo.png" />
+    <!-- PWA -->
+    <link rel="icon" type="image/png" href="assets/vaakAI_favicon.png" />
+    <link rel="apple-touch-icon" href="assets/vaakAI_icon_square.png" />
     <link rel="manifest" href="manifest.webmanifest" />
 
-    <!-- Preconnect to external resources -->
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
-    <!-- Font loading optimization -->
-    <link
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-
-    <!-- Critical CSS for initial render -->
+    <!-- Loading screen critical CSS -->
     <style>
-      /* Initial loading styles */
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
       body {
-        margin: 0;
-        padding: 0;
-        font-family: "Poppins", sans-serif;
-        background-color: #f5f5f5;
+        font-family: 'DM Sans', sans-serif;
+        background-color: #0d0d0d;
         opacity: 0;
         transition: opacity 0.3s ease;
+        -webkit-font-smoothing: antialiased;
       }
+      body.loaded { opacity: 1; }
 
-      body.loaded {
-        opacity: 1;
-      }
-
+      /* Loading screen */
       .app-loading {
         position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: #ffffff;
+        inset: 0;
+        background-color: #0d0d0d;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         z-index: 9999;
         transition: opacity 0.3s ease;
+        gap: 0;
+      }
+      .app-loading.fade-out { opacity: 0; pointer-events: none; }
+
+      /* Logo mark — 5 bars */
+      .loading-logo {
+        display: flex;
+        align-items: flex-end;
+        gap: 3px;
+        height: 36px;
+        margin-bottom: 16px;
+      }
+      .loading-logo span {
+        display: block;
+        width: 5px;
+        border-radius: 3px;
+        background: #7c3aed;
+        animation: loadBar 1.2s ease-in-out infinite alternate;
+      }
+      .loading-logo span:nth-child(1) { height: 12px; opacity: 0.4; animation-delay: 0s; }
+      .loading-logo span:nth-child(2) { height: 22px; animation-delay: 0.1s; }
+      .loading-logo span:nth-child(3) { height: 36px; background: #a78bfa; animation-delay: 0.2s; }
+      .loading-logo span:nth-child(4) { height: 20px; animation-delay: 0.1s; }
+      .loading-logo span:nth-child(5) { height: 12px; opacity: 0.4; animation-delay: 0s; }
+
+      @keyframes loadBar {
+        from { opacity: 0.4; transform: scaleY(0.7); }
+        to   { opacity: 1;   transform: scaleY(1); }
       }
 
-      .app-loading.fade-out {
-        opacity: 0;
+      /* Wordmark */
+      .loading-wordmark {
+        font-family: 'DM Sans', sans-serif;
+        font-size: 28px;
+        font-weight: 300;
+        color: #f0f0f0;
+        letter-spacing: -0.5px;
+        margin-bottom: 4px;
+      }
+      .loading-wordmark em {
+        font-style: normal;
+        font-weight: 600;
+        color: #a78bfa;
       }
 
+      .loading-tagline {
+        font-size: 10px;
+        color: #444;
+        letter-spacing: 3px;
+        font-weight: 400;
+        margin-bottom: 32px;
+      }
+
+      /* Spinner */
       .loading-spinner {
-        width: 50px;
-        height: 50px;
-        border: 4px solid rgba(33, 150, 243, 0.1);
+        width: 28px;
+        height: 28px;
+        border: 2px solid rgba(167, 139, 250, 0.15);
+        border-top-color: #a78bfa;
         border-radius: 50%;
-        border-top-color: #2196f3;
-        animation: spin 1s linear infinite;
+        animation: spin 0.8s linear infinite;
       }
 
       .loading-text {
-        margin-top: 20px;
-        font-size: 16px;
-        color: #333;
-        font-weight: 500;
+        margin-top: 14px;
+        font-size: 12px;
+        color: #555;
+        font-weight: 400;
+        letter-spacing: 0.3px;
       }
 
       @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
+        to { transform: rotate(360deg); }
       }
 
-      /* High-contrast mode support */
       @media (forced-colors: active) {
-        .loading-spinner {
-          border-color: CanvasText;
-          border-top-color: Highlight;
-        }
+        .loading-spinner { border-color: CanvasText; border-top-color: Highlight; }
       }
     </style>
   </head>
+
   <body>
-    <!-- Initial loading state -->
+    <!-- Loading screen -->
     <div class="app-loading">
+      <div class="loading-logo">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="loading-wordmark">vaak<em>AI</em></div>
+      <div class="loading-tagline">MULTILINGUAL CLINICAL ASR</div>
       <div class="loading-spinner"></div>
       <div class="loading-text">Loading application...</div>
     </div>
 
-    <!-- Main app component -->
+    <!-- Angular app -->
     <app-root></app-root>
 
-    <!-- Add noscript fallback -->
     <noscript>
-      <div style="padding: 20px; text-align: center">
-        <h2>JavaScript Required</h2>
-        <p>
-          This application requires JavaScript to function. Please enable
-          JavaScript in your browser settings and reload the page.
-        </p>
+      <div style="padding:32px;text-align:center;font-family:'DM Sans',sans-serif;color:#888;background:#0d0d0d;min-height:100vh;">
+        <h2 style="color:#f0f0f0;margin-bottom:12px;">JavaScript Required</h2>
+        <p>Please enable JavaScript in your browser settings and reload the page.</p>
       </div>
     </noscript>
 
-    <!-- Initialization script -->
     <script>
-      // Add loaded class to body after initial load
-      window.addEventListener("load", function () {
-        document.body.classList.add("loaded");
-        const loadingScreen = document.querySelector(".app-loading");
+      // Fade in body and remove loading screen once Angular boots
+      window.addEventListener('load', function () {
+        document.body.classList.add('loaded');
+        const loadingScreen = document.querySelector('.app-loading');
         if (loadingScreen) {
-          loadingScreen.classList.add("fade-out");
-          setTimeout(() => {
-            loadingScreen.style.display = "none";
-          }, 300);
+          loadingScreen.classList.add('fade-out');
+          setTimeout(() => { loadingScreen.style.display = 'none'; }, 300);
         }
       });
 
-      // Register service worker for PWA
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/ngsw-worker.js");
+      // Apply dark theme attribute immediately to prevent flash
+      document.documentElement.setAttribute('data-theme', 'dark');
+
+      // PWA service worker
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/ngsw-worker.js');
       }
 
-      // Handle keyboard navigation
-      document.addEventListener("keydown", function (e) {
-        if (e.key === "Tab") {
-          document.body.classList.add("keyboard-user");
-        }
+      // Keyboard nav class
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Tab') document.body.classList.add('keyboard-user');
       });
-
-      document.addEventListener("mousedown", function () {
-        document.body.classList.remove("keyboard-user");
+      document.addEventListener('mousedown', function () {
+        document.body.classList.remove('keyboard-user');
       });
     </script>
   </body>
