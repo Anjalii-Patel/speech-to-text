@@ -109,172 +109,204 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     const jsPDF = (await import('jspdf')).default;
     const pdf = new jsPDF({ format: 'a4', unit: 'mm', orientation: 'portrait' });
 
-    // Layout and style variables
-    const leftMargin = 20;
-    let y = 30;
-    const lineHeight = 7.5;
-    const sectionSpacing = 10; // Reduced spacing for more compact layout
-    const pageHeight = 297;
-    const maxWidth = 170;
-    const sectionBoxWidth = maxWidth;
-    const sectionBoxPadding = 6;
-    // Color variables as individual values
-    const accentColorR = 74, accentColorG = 111, accentColorB = 165;
-    const sectionBgColorR = 253, sectionBgColorG = 253, sectionBgColorB = 254;
-    const borderColorR = 74, borderColorG = 111, borderColorB = 165;
-    const headerFont = 'helvetica';
-    const normalFont = 'times';
-
-    // Header
-    pdf.setFillColor(255,255,255);
-    pdf.setDrawColor(accentColorR, accentColorG, accentColorB);
-    pdf.setLineWidth(2);
-    pdf.rect(leftMargin-5, y-20, sectionBoxWidth+10, 36, 'FD');
-    // Logo
-    const logoBase64 = await this.getImageBase64('assets/vaakAI_logo.png');
-    if (logoBase64) {
-      pdf.addImage(logoBase64, 'PNG', leftMargin, y-18, 22, 22);
-    }
-    pdf.setFont(headerFont, 'bold');
-    pdf.setFontSize(22);
-    pdf.setTextColor(accentColorR, accentColorG, accentColorB);
-    pdf.text('Vaak AI', leftMargin+30, y-6);
-    pdf.setFont(headerFont, 'normal');
-    pdf.setFontSize(12);
-    pdf.setTextColor(80,80,80);
-    pdf.text('Ahmedabad', leftMargin+30, y+6);
-    y += 26;
-    pdf.setDrawColor(accentColorR, accentColorG, accentColorB);
-    pdf.setLineWidth(2);
-    pdf.line(leftMargin, y, leftMargin+sectionBoxWidth, y);
-    y += 10;
-
-    // Date
-    pdf.setFont(headerFont, 'normal');
-    pdf.setFontSize(12);
-    pdf.setTextColor(60,60,60);
-    pdf.text(`Date: ${new Date(evaluation.timestamp).toLocaleString()}`, leftMargin, y);
-    y += lineHeight;
-
-    // Section helper for styled boxes
-    const addSection = (title: string, details: any, isList: boolean = false) => {
-      if (y > pageHeight - 35) {
-        pdf.addPage();
-        y = 30;
+    // ── safe value helper ────────────────────────────────────────────────
+    const safeStr = (v: any): string => {
+      if (v === null || v === undefined || v === '') return 'Not available';
+      if (typeof v === 'object') {
+        const vals = Object.values(v).filter(x => typeof x === 'string' && (x as string).trim() !== '');
+        return vals.length ? (vals[0] as string) : 'Not available';
       }
-      pdf.setFillColor(sectionBgColorR, sectionBgColorG, sectionBgColorB);
-      pdf.setDrawColor(borderColorR, borderColorG, borderColorB);
-      let detailCount = 1;
-      let boxHeight;
-      let lines: string[] = [];
-      if (isList && typeof details === 'object' && details !== null) {
-        detailCount = Object.keys(details).length;
-        boxHeight = lineHeight + 2 + detailCount * lineHeight + sectionBoxPadding*2;
-      } else {
-        let value = details;
-        if (!value || value === '') value = 'None';
-        lines = pdf.splitTextToSize(value, sectionBoxWidth - 25);
-        boxHeight = lines.length * lineHeight + lineHeight + sectionBoxPadding*2;
-        // If box would overflow page, break and continue on next page
-        if (y + boxHeight > pageHeight - 15) {
-          pdf.addPage();
-          y = 30;
-        }
-      }
-      pdf.rect(leftMargin, y, sectionBoxWidth, boxHeight, 'FD');
-      // Accent bar
-      pdf.setFillColor(accentColorR, accentColorG, accentColorB);
-      pdf.rect(leftMargin, y, 5, boxHeight, 'F');
-      // Section title
-      pdf.setFont(headerFont, 'bold');
-      pdf.setFontSize(15);
-      pdf.setTextColor(accentColorR, accentColorG, accentColorB);
-      pdf.text(title, leftMargin+sectionBoxPadding+5, y+lineHeight);
-      y += lineHeight + sectionBoxPadding;
-      pdf.setFont(normalFont, 'normal');
-      pdf.setFontSize(11);
-      pdf.setTextColor(44,44,44);
-      if (isList && typeof details === 'object' && details !== null) {
-        for (const [k, v] of Object.entries(details)) {
-          let value = v;
-          if (!value || value === '') value = 'None';
-          pdf.setFont(normalFont, 'bold');
-          pdf.text(`${k}:`, leftMargin+sectionBoxPadding+10, y);
-          pdf.setFont(normalFont, 'normal');
-          pdf.text(`${value}`, leftMargin+sectionBoxPadding+50, y);
-          y += lineHeight;
-        }
-      } else {
-        for (const line of lines) {
-          if (y > pageHeight - 15) {
-            pdf.addPage();
-            y = 30;
-            pdf.rect(leftMargin, y, sectionBoxWidth, boxHeight, 'FD');
-            pdf.setFillColor(accentColorR, accentColorG, accentColorB);
-            pdf.rect(leftMargin, y, 5, boxHeight, 'F');
-            pdf.setFont(headerFont, 'bold');
-            pdf.setFontSize(15);
-            pdf.setTextColor(accentColorR, accentColorG, accentColorB);
-            pdf.text(title, leftMargin+sectionBoxPadding+5, y+lineHeight);
-            y += lineHeight + sectionBoxPadding;
-            pdf.setFont(normalFont, 'normal');
-            pdf.setFontSize(11);
-            pdf.setTextColor(44,44,44);
-          }
-          pdf.text(line, leftMargin+sectionBoxPadding+10, y);
-          y += lineHeight;
-        }
-      }
-      y += sectionSpacing;
+      return String(v).trim() || 'Not available';
     };
 
-    // Sections
-    addSection('Brief History', evaluation.brief_medical_history, false);
-    addSection('Chief Complaints', {
-      Complaint: evaluation.chief_complaints_complaint,
-      Duration: evaluation.chief_complaints_duration,
-      Description: evaluation.chief_complaints_description
-    }, true);
-    addSection('Current Symptoms & Medical Background', evaluation.current_symptoms_and_medical_background, false);
-    addSection('Past Medical History', {
-      Diagnosis_Type: evaluation.past_medical_history_diagnosis_type,
-      Disease: evaluation.past_medical_history_disease
-    }, true);
-    addSection('Hospitalization & Surgical History', {
-      Diagnosis: evaluation.hospitalization_diagnosis,
-      Treatment: evaluation.hospitalization_treatment,
-      Admission_Time: evaluation.hospitalization_admission_time
-    }, true);
-    addSection('Gynecological History', evaluation.gynecological_history, false);
-    addSection('Lifestyle & Social Activity', {
-      Physical_Activity: evaluation.lifestyle_physical_activity,
-      Time: evaluation.lifestyle_time,
-      Status: evaluation.lifestyle_status
-    }, true);
-    addSection('Family History', {
-      Relation: evaluation.family_history_relation,
-      Disease_Name: evaluation.family_history_disease_name,
-      Age: evaluation.family_history_age
-    }, true);
-    addSection('Allergies & Hypersensitivities', {
-      Allergy: evaluation.allergies_allergy,
-      Allergen: evaluation.allergies_allergen,
-      Type_of_Reaction: evaluation.allergies_reaction_type,
-      Status: evaluation.allergies_status,
-      Severity: evaluation.allergies_severity
-    }, true);
+    // ── layout ───────────────────────────────────────────────────────────
+    const L  = 15;
+    const R  = 195;
+    const W  = 180;
+    const PH = 297;
+    const lh = 6;
+    const f  = 'helvetica';
 
-    // Footer (always fits at bottom of last page)
-    if (y > pageHeight - 15) {
-      pdf.addPage();
-      y = pageHeight - 15;
-    }
-    pdf.setFont(headerFont, 'normal');
-    pdf.setFontSize(10);
-    pdf.setTextColor(120,120,120);
-    pdf.text('This summary is auto-generated and evaluated for medical documentation purposes.', leftMargin, pageHeight - 10);
+    const navy   : [number,number,number] = [30,  40,  80 ];
+    const white  : [number,number,number] = [255, 255, 255];
+    const ink    : [number,number,number] = [30,  30,  30 ];
+    const grey1  : [number,number,number] = [80,  80,  80 ];
+    const grey2  : [number,number,number] = [150, 150, 150];
+    const grey3  : [number,number,number] = [230, 230, 230];
+    const altRow : [number,number,number] = [247, 248, 250];
+    const titleBg: [number,number,number] = [240, 242, 246];
 
-    pdf.save(`VaakAI_Prescription_${new Date(evaluation.timestamp).toLocaleString()}.pdf`);
+    let y = 0;
+
+    const guard = (need: number) => {
+      if (y + need > PH - 20) {
+        addFooter();
+        pdf.addPage();
+        y = addPageHeader();
+      }
+    };
+
+    const addFooter = () => {
+      pdf.setDrawColor(...grey3);
+      pdf.setLineWidth(0.3);
+      pdf.line(L, PH - 14, R, PH - 14);
+      pdf.setFont(f, 'normal');
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(...grey2);
+      pdf.text('vaakAI Clinical Summary  —  Auto-generated  —  For documentation purposes only', 105, PH - 9, { align: 'center' });
+      pdf.text(`Page ${(pdf as any).internal.getCurrentPageInfo().pageNumber}`, R, PH - 9, { align: 'right' });
+    };
+
+    let logoBase64: string | null = null;
+    logoBase64 = await this.getImageBase64('assets/vaakAI.png');
+
+    const addPageHeader = (): number => {
+      pdf.setFillColor(...navy);
+      pdf.rect(0, 0, 210, 38, 'F');
+
+      if (logoBase64) {
+        pdf.addImage(logoBase64, 'PNG', L, 8, 16, 16);
+      }
+
+      pdf.setFont(f, 'bold');
+      pdf.setFontSize(20);
+      pdf.setTextColor(...white);
+      pdf.text('vaakAI', L + 20, 20);
+
+      pdf.setFont(f, 'normal');
+      pdf.setFontSize(8);
+      pdf.setTextColor(180, 190, 220);
+      pdf.text('MULTILINGUAL CLINICAL ASR', L + 20, 27);
+
+      pdf.setFontSize(8);
+      pdf.setTextColor(200, 210, 235);
+      pdf.text(`Generated: ${new Date(evaluation.timestamp).toLocaleString()}`, R, 20, { align: 'right' });
+
+      const titleY = 46;
+      pdf.setFont(f, 'bold');
+      pdf.setFontSize(15);
+      pdf.setTextColor(...ink);
+      pdf.text('Clinical Summary Report', L, titleY);
+      const dividerY = titleY + 3;
+      pdf.setDrawColor(...grey3);
+      pdf.setLineWidth(0.4);
+      pdf.line(L, dividerY, R, dividerY);
+      return dividerY + 8;
+    };
+
+    // Page 1 header
+    y = addPageHeader();
+
+    const addSection = (
+      title: string,
+      rows: { label: string; value: string }[],
+      correct: boolean
+    ) => {
+      const rowH = lh + 2;
+      guard(10 + rows.length * rowH + 4);
+
+      pdf.setFillColor(...titleBg);
+      pdf.rect(L, y, W, 8.5, 'F');
+
+      pdf.setFont(f, 'bold');
+      pdf.setFontSize(10);
+      pdf.setTextColor(...ink);
+      pdf.text(title, L + 22, y + 5.8);
+
+      if (correct) {
+        pdf.setFillColor(34, 139, 34);
+        pdf.roundedRect(R - 20, y + 1.2, 19, 6, 1, 1, 'F');
+        pdf.setFont(f, 'bold');
+        pdf.setFontSize(7);
+        pdf.setTextColor(...white);
+        pdf.text('VERIFIED', R - 19, y + 5.5);
+      }
+
+      y += 9.5;
+
+      rows.forEach((row, i) => {
+        guard(rowH + 2);
+        if (i % 2 === 1) {
+          pdf.setFillColor(...altRow);
+          pdf.rect(L, y - 1, W, rowH + 0.5, 'F');
+        }
+        pdf.setFont(f, 'bold');
+        pdf.setFontSize(8.5);
+        pdf.setTextColor(...grey1);
+        pdf.text(row.label, L + 4, y + lh - 1);
+
+        pdf.setFont(f, 'normal');
+        pdf.setFontSize(9);
+        pdf.setTextColor(...ink);
+        const valLines = pdf.splitTextToSize(row.value, W - 65);
+        pdf.text(valLines[0], L + 62, y + lh - 1);
+        for (let vl = 1; vl < valLines.length; vl++) {
+          y += lh;
+          guard(lh + 2);
+          pdf.text(valLines[vl], L + 62, y + lh - 1);
+        }
+        y += rowH;
+      });
+
+      pdf.setDrawColor(...grey3);
+      pdf.setLineWidth(0.25);
+      pdf.line(L, y, R, y);
+      y += 5;
+    };
+
+    addSection('Brief Medical History', [
+      { label: 'Summary', value: safeStr(evaluation.brief_medical_history_text || evaluation.brief_medical_history) }
+    ], evaluation.brief_medical_history_correct === true || evaluation.brief_medical_history_correct === 'true');
+
+    addSection('Chief Complaints', [
+      { label: 'Complaint',   value: safeStr(evaluation.chief_complaints_complaint) },
+      { label: 'Duration',    value: safeStr(evaluation.chief_complaints_duration) },
+      { label: 'Description', value: safeStr(evaluation.chief_complaints_description) },
+    ], evaluation.chief_complaints_correct === true || evaluation.chief_complaints_correct === 'true');
+
+    addSection('Current Symptoms & Background', [
+      { label: 'Details', value: safeStr(evaluation.current_symptoms_and_medical_background) }
+    ], evaluation.current_symptoms_correct === true || evaluation.current_symptoms_correct === 'true');
+
+    addSection('Past Medical History', [
+      { label: 'Diagnosis Type', value: safeStr(evaluation.past_medical_history_diagnosis_type) },
+      { label: 'Disease',        value: safeStr(evaluation.past_medical_history_disease) },
+    ], evaluation.past_medical_history_correct === true || evaluation.past_medical_history_correct === 'true');
+
+    addSection('Hospitalization & Surgical History', [
+      { label: 'Diagnosis',      value: safeStr(evaluation.hospitalization_diagnosis) },
+      { label: 'Treatment',      value: safeStr(evaluation.hospitalization_treatment) },
+      { label: 'Admission Time', value: safeStr(evaluation.hospitalization_admission_time) },
+    ], evaluation.hospitalization_correct === true || evaluation.hospitalization_correct === 'true');
+
+    addSection('Gynecological History', [
+      { label: 'Details', value: safeStr(evaluation.gynecological_history) }
+    ], evaluation.gynecological_history_correct === true || evaluation.gynecological_history_correct === 'true');
+
+    addSection('Lifestyle & Social Activity', [
+      { label: 'Physical Activity', value: safeStr(evaluation.lifestyle_physical_activity) },
+      { label: 'Time',              value: safeStr(evaluation.lifestyle_time) },
+      { label: 'Status',            value: safeStr(evaluation.lifestyle_status) },
+    ], evaluation.lifestyle_correct === true || evaluation.lifestyle_correct === 'true');
+
+    addSection('Family History', [
+      { label: 'Relation', value: safeStr(evaluation.family_history_relation) },
+      { label: 'Disease',  value: safeStr(evaluation.family_history_disease_name) },
+      { label: 'Age',      value: safeStr(evaluation.family_history_age) },
+    ], evaluation.family_history_correct === true || evaluation.family_history_correct === 'true');
+
+    addSection('Allergies & Hypersensitivities', [
+      { label: 'Allergy',       value: safeStr(evaluation.allergies_allergy) },
+      { label: 'Allergen',      value: safeStr(evaluation.allergies_allergen) },
+      { label: 'Reaction Type', value: safeStr(evaluation.allergies_reaction_type) },
+      { label: 'Status',        value: safeStr(evaluation.allergies_status) },
+      { label: 'Severity',      value: safeStr(evaluation.allergies_severity) },
+    ], evaluation.allergies_correct === true || evaluation.allergies_correct === 'true');
+
+    addFooter();
+
+    const safeDate = new Date(evaluation.timestamp).toLocaleString().replace(/[/:,\s]+/g, '_');
+    pdf.save(`vaakAI_Report_${safeDate}.pdf`);
   }
 
   // Helper to load image and convert to base64
@@ -294,33 +326,28 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
           resolve(null);
         }
       };
-      img.onerror = function () {
-        resolve(null);
-      };
+      img.onerror = function () { resolve(null); };
       img.src = url;
     });
   }
 
-  // Helper for multiline text with word wrap and page break
   addMultilineText(pdf: any, text: string, x: number, y: number, maxWidth: number, lineHeight: number): number {
     if (!text) return y;
     const lines = pdf.splitTextToSize(text, maxWidth);
     for (const line of lines) {
-      if (y > 287) { // A4 bottom margin
-        pdf.addPage();
-        y = 25;
-      }
+      if (y > 287) { pdf.addPage(); y = 25; }
       pdf.text(line, x, y);
       y += lineHeight;
     }
     return y;
   }
+
   // Cleanup subject for better subscription management
   private destroy$ = new Subject<void>();
 
   private boundCheckScreenSize: any;
   clearSections: boolean = false;
-  sidebarCollapsed: boolean = true; // Set to true to make sidebar collapsed by default
+  sidebarCollapsed: boolean = false; // false = expanded icon-rail sidebar on desktop
 
   // Add missing properties
   isSidebarOpen: boolean = false;
@@ -355,6 +382,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   isMobile: boolean = false;
   activeSection: string = 'live'; // Default active section
   sidebarActive: boolean = false; // For mobile sidebar toggle
+  isDarkMode: boolean = true; // Theme toggle — dark by default
 
   // Interactive UI properties
   isDragging: boolean = false; // For drag and drop
@@ -628,7 +656,9 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   checkScreenSize() {
     if (typeof document !== 'undefined') {
       this.isMobile = document.documentElement.clientWidth < 768;
-      this.sidebarActive = !this.isMobile && !this.sidebarCollapsed; // Only active if not mobile and not collapsed
+      if (!this.isMobile) {
+        this.sidebarActive = false; // desktop: sidebar always visible via CSS, no active class needed
+      }
     }
   }
 
@@ -642,6 +672,8 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     // Initialize application
     console.log('App initialized');
     if (typeof document !== 'undefined') {
+      // Apply initial theme
+      document.documentElement.setAttribute('data-theme', this.isDarkMode ? 'dark' : 'light');
       this.checkScreenSize();
       this.boundCheckScreenSize = this.checkScreenSize.bind(this);
       window.addEventListener('resize', this.boundCheckScreenSize);
@@ -714,17 +746,26 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     }
   }
 
-  // Sidebar toggle methods for mobile
+  // Theme toggle
+  toggleTheme(): void {
+    this.isDarkMode = !this.isDarkMode;
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', this.isDarkMode ? 'dark' : 'light');
+    }
+  }
+
+  // Sidebar toggle — icon-rail on desktop, overlay drawer on mobile
   toggleSidebar(): void {
-    this.sidebarActive = !this.sidebarActive;
-    this.sidebarCollapsed = !this.sidebarActive;
-    console.log('Sidebar toggled:', this.sidebarActive ? 'open' : 'collapsed');
+    if (this.isMobile) {
+      this.sidebarActive = !this.sidebarActive;
+    } else {
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+    }
   }
 
   closeSidebar(): void {
     if (this.isMobile) {
       this.sidebarActive = false;
-      this.sidebarCollapsed = true;
     }
   }
 
@@ -757,20 +798,10 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         this.helpService.showContextualHelp(`section-${section}`);
       }, 300);
 
-      // Always close sidebar when clicking an item
-      this.sidebarActive = false;
-      this.sidebarCollapsed = true;
-
-      // Add a small delay to ensure the sidebar closing animation is smooth
-      setTimeout(() => {
-        const overlay = document.querySelector(
-          '.sidebar-overlay'
-        ) as HTMLElement;
-        if (overlay) {
-          overlay.style.opacity = '0';
-          overlay.style.visibility = 'hidden';
-        }
-      }, 50);
+      // Close mobile overlay on navigation, leave desktop rail untouched
+      if (this.isMobile) {
+        this.sidebarActive = false;
+      }
     }
   }
 
