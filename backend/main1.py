@@ -52,7 +52,7 @@ whisper_lock = Lock()          # prevents concurrent Whisper calls on same model
 try:
     logger.info("Loading Whisper model...")
     model = WhisperModel(
-        "large-v3",            # v3 > v2 for Indic languages
+        "large-v3",
         local_files_only=False,
         device=device,
         compute_type=compute_type,
@@ -103,13 +103,14 @@ def ASR(audio: np.ndarray) -> str:
 
     segments, info = model.transcribe(
         audio,
-        beam_size=3,
+        beam_size=5,
         vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 700},
+        vad_parameters={"min_silence_duration_ms": 500},
         task="translate",
         language=None,
         condition_on_previous_text=False,
         word_timestamps=True,
+        initial_prompt="Patient consultation. Medical terms in Hindi, Gujarati, Marathi, or English.",
     )
 
     if info.language_probability < LANG_PROB_THRESHOLD:
@@ -219,7 +220,7 @@ async def ask_llama(context: str = " ") -> dict:
             "options": {"temperature": 0.0},
             "stream":  False,
         }
-        for attempt in range(3):                       # retry up to 3×
+        for attempt in range(3):
             try:
                 async with http_session.post(OLLAMA_API_URL, json=payload) as resp:
                     if resp.status == 200:
@@ -270,11 +271,11 @@ async def transcribe_audio(websocket: WebSocket):
     await websocket.accept()
 
     SAMPLE_RATE = 16000
-    CHUNK_SECONDS = 6                              # increased from 4→6
+    CHUNK_SECONDS = 6
     OVERLAP_SEC = 1
     CHUNK_SIZE = SAMPLE_RATE * CHUNK_SECONDS
     OVERLAP_SIZE = SAMPLE_RATE * OVERLAP_SEC
-    MAX_QUEUE = SAMPLE_RATE * 30               # backpressure: ~30s max buffered
+    MAX_QUEUE = SAMPLE_RATE * 30
 
     audio_queue: list[np.ndarray] = []
     total_buffered = 0
@@ -289,7 +290,7 @@ async def transcribe_audio(websocket: WebSocket):
 
     try:
         while True:
-            # heartbeat / receive with timeout to detect dead connections
+            # receive with timeout to detect dead connections
             try:
                 audio_bytes = await asyncio.wait_for(websocket.receive_bytes(), timeout=30)
             except asyncio.TimeoutError:
