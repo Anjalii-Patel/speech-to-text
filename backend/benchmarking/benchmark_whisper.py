@@ -14,15 +14,15 @@ from datetime import datetime
 
 import torch
 import librosa
+import glob
+import re
 
 # CONFIG
-AUDIO_FILES = [
-    "/path/to/audio1.wav",
-    "/path/to/audio2.wav",
-    "/path/to/audio3.wav",
-    "/path/to/audio4.wav",
-    "/path/to/audio5.wav",
-]
+AUDIO_DIR = "./benchmarking/data/audio"
+AUDIO_FILES = sorted(
+    glob.glob(os.path.join(AUDIO_DIR, "english*.mp3")),
+    key=lambda p: int(re.search(r"\d+", os.path.basename(p)).group())
+)
 
 MODEL_CONFIGS = [
     ("openai-whisper", "large"),
@@ -136,6 +136,8 @@ def main():
                         row["error_message"] = f"subprocess exit code {proc.returncode}"
                     if proc.returncode != 0:
                         print(f"stderr: {proc.stderr[-1500:]}")
+                    if row["status"] == "success" and proc.stderr.strip():
+                        print(f"stderr (non-fatal):\n{proc.stderr[-2000:]}")
 
                 except subprocess.TimeoutExpired:
                     row["error_message"] = f"timeout after {SUBPROCESS_TIMEOUT_SEC}s"

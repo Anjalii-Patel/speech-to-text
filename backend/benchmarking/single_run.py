@@ -39,6 +39,7 @@ def measure_openai_whisper_gflops(model, audio: np.ndarray, num_generated_tokens
         mel = openai_whisper_pkg.pad_or_trim(mel, openai_whisper_pkg.audio.N_FRAMES)
         mel_input = mel.unsqueeze(0)
 
+        print(f"DEBUG: model dtype={dtype}, encoder param count={sum(p.numel() for p in model.encoder.parameters())}", file=sys.stderr)
         encoder_macs, _ = thop_profile(model.encoder, inputs=(mel_input,), verbose=False)
 
         # Decoder FLOPs: one forward pass at a representative single-token step
@@ -60,6 +61,7 @@ def measure_openai_whisper_gflops(model, audio: np.ndarray, num_generated_tokens
         }
     except Exception as e:
         print(f"thop FLOP measurement failed: {type(e).__name__}: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return None
 
 def load_audio(path: str) -> np.ndarray:
@@ -67,9 +69,9 @@ def load_audio(path: str) -> np.ndarray:
     return audio.astype(np.float32)
 
 def load_reference_text(audio_path: str) -> str | None:
-    """audio1.wav -> audio1.txt, same directory."""
-    base, _ = os.path.splitext(audio_path)
-    ref_path = base + ".txt"
+    base = os.path.splitext(os.path.basename(audio_path))[0]
+    ref_path = os.path.join(os.path.dirname(audio_path), "..", "text", base + ".txt")
+    ref_path = os.path.normpath(ref_path)
     if not os.path.isfile(ref_path):
         return None
     with open(ref_path, "r", encoding="utf-8") as f:
