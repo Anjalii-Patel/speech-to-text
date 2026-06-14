@@ -52,7 +52,7 @@ whisper_lock = Lock()          # prevents concurrent Whisper calls on same model
 try:
     logger.info("Loading Whisper model...")
     model = WhisperModel(
-        "large-v3",
+        "large-v2",
         local_files_only=False,
         device=device,
         compute_type=compute_type,
@@ -87,7 +87,7 @@ async def shutdown():
 def preprocess_audio(audio: np.ndarray, sr: int = 16000) -> np.ndarray:
     """Noise-reduce → normalize. Returns float32."""
     # Spectral gating noise reduction
-    audio = nr.reduce_noise(y=audio, sr=sr, stationary=False, prop_decrease=0.85)
+    audio = nr.reduce_noise(y=audio, sr=sr, stationary=False, prop_decrease=0.65)
     max_val = np.max(np.abs(audio))
     if max_val > 0:
         audio = audio / max_val
@@ -96,6 +96,7 @@ def preprocess_audio(audio: np.ndarray, sr: int = 16000) -> np.ndarray:
 # ASR
 RMS_THRESHOLD = 0.01
 LANG_PROB_THRESHOLD = 0.4
+beamsize = 5
 
 def ASR(audio: np.ndarray) -> str:
     if np.sqrt(np.mean(audio**2)) < RMS_THRESHOLD:
@@ -103,7 +104,7 @@ def ASR(audio: np.ndarray) -> str:
 
     segments, info = model.transcribe(
         audio,
-        beam_size=5,
+        beam_size=beamsize,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 500},
         task="translate",
@@ -113,9 +114,11 @@ def ASR(audio: np.ndarray) -> str:
         initial_prompt="Patient consultation. Medical terms in Hindi, Gujarati, Marathi, or English.",
     )
 
+    text = " ".join(seg.text.strip() for seg in segments)
     if info.language_probability < LANG_PROB_THRESHOLD:
+        logger.warning(f"Low lang_prob: {info.language_probability:.2f} ({info.language}) — dropped: '{text[:120]}'")
         return ""
-    return " ".join(seg.text.strip() for seg in segments)
+    return text
 
 async def transcribe_async(audio: np.ndarray) -> str:
     """Thread-safe Whisper call with model lock."""
@@ -383,8 +386,6 @@ async def upload_and_summary(file: UploadFile = File(...)):
         return {"error": str(e)}
 
 # REST: beam size
-beamsize = 3
-
 @app.post("/update-beam-size/")
 async def update_beam_size(new_beam_size: int = Form(...)):
     global beamsize
